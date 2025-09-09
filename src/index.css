@@ -1,8 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800&display=swap");
 @import "tailwindcss";
 
 /* Base document sizing */
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
 }
 
@@ -10,4 +12,36 @@ body {
   margin: 0;
   background: #ffffff; /* or inherit; controlled by Tailwind classes on containers */
   color: #0f172a; /* slate-900 */
+}
+
+@keyframes float-fade {
+  0% {
+    transform: translateY(0);
+    opacity: 0.8;
+    scale: 0.9;
+    animation-timing-function: ease-in-out;
+  }
+  25% {
+    transform: translateY(12px);
+    opacity: 1;
+    scale: 1;
+    animation-timing-function: ease-in-out;
+  }
+  50% {
+    transform: translateY(0);
+    opacity: 0.9;
+    animation-timing-function: ease-in-out;
+  }
+  75% {
+    transform: translateY(12px);
+    opacity: 1;
+      scale: 1;
+    animation-timing-function: ease-in-out;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 0.8;
+    scale: 0.9;
+    animation-timing-function: ease-in-out;
+  }
 }
