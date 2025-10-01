@@ -28,7 +28,7 @@ export default function Home() {
         <div className="h-18 px-10 flex items-center justify-between">
           {/*왼쪽 로고*/}
           <a href="/" className="flex items-center">
-            <img src="/drive-logo.svg" alt="Drive Logo" className="h-12 w-auto" />
+            <img src="/drive-favicon.svg" alt="Drive Icon" className="h-12 w-12" />
           </a>
 
           {/*가운데 네비게이션*/}
