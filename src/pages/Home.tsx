@@ -1,5 +1,6 @@
 // src/pages/Home.tsx
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 export default function Home() {
   const [revealTournaments, setRevealTournaments] = useState(false);
@@ -45,9 +46,13 @@ export default function Home() {
     <section className="min-h-screen bg-white">
       <header className="border-b border-gray-100">
         <div className="mx-auto flex h-20 w-full max-w-7xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
-          <a href="/" className="flex items-center gap-3">
-            <img src="/drive-favicon.svg" alt="Drive Icon" className="h-10 w-10" />
-            <span className="hidden text-lg font-semibold text-gray-900 sm:inline">DRIVE</span>
+          <a href="/" className="flex items-center gap-2">
+            <img src="/drive-favicon.svg" alt="Drive Icon" className="h-10 w-10 sm:hidden" />
+            <img
+              src="/drive-wordmark.svg"
+              alt="Drive Wordmark"
+              className="hidden h-8 w-auto sm:block"
+            />
           </a>
 
           <nav className="hidden flex-1 items-center justify-center gap-8 text-sm font-medium text-gray-700 lg:flex">
@@ -63,13 +68,14 @@ export default function Home() {
           </nav>
 
           <div className="hidden w-[140px] justify-end lg:flex">
-            <button
+            <Link
+              to="/login"
               className="flex items-center gap-2 rounded-full border border-blue-500 bg-white px-5 py-2 text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
               aria-label="로그인"
             >
               <img src="/user-icon.svg" alt="사용자" className="h-5 w-5 text-blue-600" />
               <span className="font-medium">로그인</span>
-            </button>
+            </Link>
           </div>
 
           <button
@@ -106,14 +112,15 @@ export default function Home() {
                   {link.label}
                 </a>
               ))}
-              <button
+              <Link
+                to="/login"
                 className="flex items-center justify-center gap-2 rounded-full border border-blue-500 bg-white px-5 py-2 text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                 aria-label="로그인"
                 onClick={() => setIsMenuOpen(false)}
               >
                 <img src="/user-icon.svg" alt="사용자" className="h-5 w-5 text-blue-600" />
                 <span className="font-medium">로그인</span>
-              </button>
+              </Link>
             </div>
           </div>
         )}

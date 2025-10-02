@@ -1,0 +1,26 @@
+<svg viewBox="0 0 150 50" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+    <!-- Gradient 정의: 파란색 계열 -->
+    <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="240" y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#2563EB"/>
+            <stop offset="1" stop-color="#06B6D4"/>
+        </linearGradient>
+    </defs>
+
+    <!-- 텍스트: 이탤릭 스큐 + 볼드 -->
+    <g transform="translate(10,6) skewX(-18)">
+        <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="3" dy="3" stdDeviation="2" flood-color="#06B6D4" flood-opacity="0.6"/>
+        </filter>
+        <text
+                x="0"
+                y="40"
+                fill="url(#g)"
+                font-size="48"
+                font-weight="800"
+                font-family="Orbitron, sans-serif"
+        >
+            DRIVE
+        </text>
+    </g>
+</svg>
