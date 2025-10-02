@@ -1,4 +1,4 @@
-import {type FormEvent, useState } from "react";
+import { type FormEvent, useState } from "react";
 
 export default function Login() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -16,44 +16,15 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50">
-      <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-12 px-4 pt-12 pb-16 sm:px-6 sm:pt-16 sm:pb-20 lg:flex-row lg:items-center lg:justify-between lg:pt-20 lg:pb
-           -24">
-        <div className="max-w-xl space-y-6 text-center lg:text-left">
-          <div className="flex items-center justify-center gap-3 lg:justify-start">
-            <img src="/drive-favicon.svg" alt="Drive Icon" className="h-12 w-12" />
-            <img src="/drive-wordmark.svg" alt="Drive Wordmark" className="hidden h-8 w-auto sm:block" />
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl lg:text-5xl">
-            DRIVE 계정으로 로그인하세요
-          </h1>
-          <p className="hidden text-base text-gray-600 sm:text-lg sm:block">
-            하나의 계정으로 대회 일정 확인, 선수 검색, 클럽 예약까지 모두 이용할 수 있습니다.
-          </p>
-
-          <div className="hidden rounded-3xl border border-blue-100 bg-white/60 p-6 backdrop-blur-lg sm:block sm:p-8">
-            <dl className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <div>
-                <dt className="text-sm font-medium text-blue-600">실시간 대회 일정</dt>
-                <dd className="mt-1 text-sm text-gray-600">
-                  전국 동호인 대회의 일정과 결과를 빠르게 확인하세요.
-                </dd>
-              </div>
-              <div>
-                <dt className="text-sm font-medium text-blue-600">대진표 생성하기</dt>
-                <dd className="mt-1 text-sm text-gray-600">
-                  참가자와 경기 수를 입력하면 자동으로 대진표를 만들어 드립니다.
-                </dd>
-              </div>
-            </dl>
-          </div>
-        </div>
-
+      <div className="mx-auto flex w-full max-w-6xl justify-center px-4 pt-20 pb-24 sm:px-6 lg:px-8">
         <div className="w-full max-w-md">
           <div className="rounded-3xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur sm:p-8">
-            <h2 className="text-2xl font-semibold text-gray-900">로그인</h2>
-            <p className="mt-2 text-sm text-gray-500">
-              아직 계정이 없다면 <a href="#" className="font-medium text-blue-600 hover:text-blue-500">회원가입</a>을 진행해주세요.
-            </p>
+            <div className="mb-6 flex items-center justify-center gap-3">
+              <img src="/drive-favicon.svg" alt="Drive Icon" className="h-10 w-10" />
+              <img src="/drive-wordmark.svg" alt="Drive Wordmark" className="hidden h-7 w-auto sm:block" />
+            </div>
+
+            <h1 className="text-center text-2xl font-semibold text-gray-900">로그인</h1>
 
             <form className="mt-6 space-y-6" onSubmit={handleSubmit}>
               <div>
@@ -125,6 +96,10 @@ export default function Login() {
                   Kakao 계정으로 계속하기
                 </button>
               </div>
+
+              <p className="text-center text-sm text-gray-500">
+                아직 계정이 없다면 <a href="#" className="font-medium text-blue-600 hover:text-blue-500">회원가입</a>을 진행해주세요.
+              </p>
             </form>
           </div>
         </div>
