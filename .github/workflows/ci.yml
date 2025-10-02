@@ -28,3 +28,5 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          ROLLUP_SKIP_NODEJS_NATIVE_BUILD: "1"
