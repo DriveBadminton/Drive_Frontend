@@ -3,12 +3,12 @@ import { Link, NavLink } from "react-router-dom";
 
 interface NavItem {
   label: string;
-  to: string;
+  to?: string;
+  href?: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "선수 검색", to: "/player-search" },
-  { label: "대회 검색", to: "/tournament-search" },
+  { label: "선수 및 대회 검색", to: "/home" },
   { label: "코트매니저", to: "/court_manager" },
 ];
 
@@ -24,27 +24,35 @@ export default function MainHeader() {
         </Link>
 
         <nav className="hidden flex-1 items-center justify-center gap-8 text-sm font-medium text-gray-700 lg:flex">
-          {NAV_ITEMS.map((item) => (
-            item.to.startsWith("#") ? (
-              <a
-                key={item.label}
-                href={item.to}
-                className="transition-colors hover:text-gray-900"
-              >
-                {item.label}
-              </a>
-            ) : (
+          {NAV_ITEMS.map((item) => {
+            if (item.href) {
+              return (
+                <a key={item.label} href={item.href} className="transition-colors hover:text-gray-900">
+                  {item.label}
+                </a>
+              );
+            }
+
+            if (item.to?.startsWith("#")) {
+              return (
+                <a key={item.label} href={item.to} className="transition-colors hover:text-gray-900">
+                  {item.label}
+                </a>
+              );
+            }
+
+            return (
               <NavLink
                 key={item.label}
-                to={item.to}
+                to={item.to ?? "/"}
                 className={({ isActive }) =>
                   `transition-colors hover:text-gray-900 ${isActive ? "text-gray-900 font-semibold" : ""}`
                 }
               >
                 {item.label}
               </NavLink>
-            )
-          ))}
+            );
+          })}
         </nav>
 
         <div className="hidden w-[140px] justify-end lg:flex">
@@ -100,20 +108,37 @@ export default function MainHeader() {
       {isMenuOpen && (
         <div className="border-t border-gray-100 bg-white lg:hidden">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 pb-6 pt-4 sm:px-6">
-            {NAV_ITEMS.map((item) =>
-              item.to.startsWith("#") ? (
-                <a
-                  key={`mobile-${item.label}`}
-                  href={item.to}
-                  className="text-sm font-medium text-gray-700 transition-colors hover:text-gray-900"
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  {item.label}
-                </a>
-              ) : (
+            {NAV_ITEMS.map((item) => {
+              if (item.href) {
+                return (
+                  <a
+                    key={`mobile-${item.label}`}
+                    href={item.href}
+                    className="text-sm font-medium text-gray-700 transition-colors hover:text-gray-900"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    {item.label}
+                  </a>
+                );
+              }
+
+              if (item.to?.startsWith("#")) {
+                return (
+                  <a
+                    key={`mobile-${item.label}`}
+                    href={item.to}
+                    className="text-sm font-medium text-gray-700 transition-colors hover:text-gray-900"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    {item.label}
+                  </a>
+                );
+              }
+
+              return (
                 <NavLink
                   key={`mobile-${item.label}`}
-                  to={item.to}
+                  to={item.to ?? "/"}
                   className={({ isActive }) =>
                     `text-sm font-medium transition-colors ${isActive ? "text-gray-900" : "text-gray-700"}`
                   }
@@ -121,8 +146,8 @@ export default function MainHeader() {
                 >
                   {item.label}
                 </NavLink>
-              )
-            )}
+              );
+            })}
             <Link
               to="/login"
               className="flex items-center justify-center gap-2 rounded-full border border-blue-500 bg-white px-5 py-2 text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
