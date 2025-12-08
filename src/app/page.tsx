@@ -13,9 +13,9 @@ export default function Home() {
   const tournamentsSectionRef = useRef<HTMLElement | null>(null);
 
   const tournamentSections = [
-    { id: "current-tournaments", title: "진행 중인 대회 🏸", type: "current" },
-    { id: "upcoming-tournaments", title: "예정된 대회 📅", type: "upcoming" },
-    { id: "finished-tournaments", title: "종료된 대회 🏆", type: "finished" },
+    { id: "current-tournaments", title: "진행 중인 대회", type: "current" },
+    { id: "upcoming-tournaments", title: "예정된 대회", type: "upcoming" },
+    { id: "finished-tournaments", title: "종료된 대회", type: "finished" },
   ];
 
   const placeholderCards: any[] = []; // Start with empty state to show the improvement
@@ -42,9 +42,11 @@ export default function Home() {
       {/* Hero Section */}
       <section className="relative mx-auto flex min-h-[500px] w-full max-w-7xl flex-col items-center justify-center overflow-hidden px-4 pt-24 pb-16 text-center sm:px-6 lg:px-8">
         {/* Background Decorative */}
-        <div className="absolute top-0 -z-10 h-full w-full opacity-30">
-          <div className="absolute top-1/2 left-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-green-200 blur-3xl" />
-          <div className="absolute top-1/3 right-1/4 h-[300px] w-[300px] rounded-full bg-emerald-100 blur-3xl" />
+        {/* Background Decorative */}
+        <div className="absolute top-0 -z-10 h-full w-full overflow-hidden">
+          <div className="absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-tr from-green-200 to-emerald-200 blur-[100px] opacity-40 animate-pulse" />
+          <div className="absolute top-0 right-0 h-[400px] w-[400px] rounded-full bg-blue-100 blur-[80px] opacity-30" />
+          <div className="absolute bottom-0 left-0 h-[300px] w-[300px] rounded-full bg-yellow-100 blur-[60px] opacity-30" />
         </div>
 
         {/* 로고 */}
@@ -58,14 +60,15 @@ export default function Home() {
 
         {/* 검색창 */}
         <div className="flex w-full justify-center pb-12">
-          <div className="relative w-full max-w-2xl group">
+          <div className="relative w-full max-w-2xl transform transition-all hover:scale-105">
+            <div className="absolute inset-0 -z-10 rounded-full bg-white/40 blur-xl"></div>
             <input
               type="text"
               placeholder="선수 이름 또는 대회 이름을 입력하세요."
-              className="h-14 w-full rounded-full bg-white pl-14 pr-6 shadow-lg ring-1 ring-gray-200 transition-all placeholder:text-gray-400 focus:outline-hidden focus:ring-2 focus:ring-green-500 focus:shadow-green-100"
+              className="h-16 w-full rounded-full bg-white/80 backdrop-blur-md pl-16 pr-6 shadow-2xl ring-1 ring-white/50 transition-all placeholder:text-gray-400 focus:outline-hidden focus:ring-2 focus:ring-green-500/50 focus:bg-white"
               aria-label="검색"
             />
-            <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-green-500 transition-colors">
+            <span className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 text-gray-500">
               <Icon name="search" className="h-6 w-6" />
             </span>
           </div>
@@ -117,19 +120,20 @@ export default function Home() {
                   </div>
                 ) : (
                   // Empty State
-                  <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 py-16 text-center">
-                    <div className="mb-4 rounded-full bg-white p-4 shadow-sm ring-1 ring-gray-100">
-                      <Icon name="trophy" className="h-8 w-8 text-gray-300" />
+                  <div className="flex flex-col items-center justify-center rounded-3xl border border-gray-100 bg-white p-12 text-center shadow-lg transition-all hover:shadow-xl">
+                    <div className="mb-6 rounded-2xl bg-gradient-to-br from-green-50 to-emerald-50 p-6 shadow-inner">
+                      <Icon name="trophy" className="h-10 w-10 text-green-600" />
                     </div>
-                    <h3 className="text-lg font-medium text-gray-900">등록된 대회가 없습니다.</h3>
-                    <p className="mt-1 mb-6 text-sm text-gray-500 max-w-sm">
+                    <h3 className="mb-2 text-xl font-bold text-gray-900">등록된 대회가 없습니다</h3>
+                    <p className="mb-8 max-w-sm text-gray-500">
                       현재 {section.title.replace(/[^가-힣\s]/g, "")}가 없습니다.<br />
-                      새로운 대회를 직접 개최해보세요!
+                      새로운 대회를 직접 개최하여 시작해보세요!
                     </p>
                     <Button
                       variant="primary"
-                      size="sm"
+                      size="lg"
                       onClick={() => router.push('/create-tournament')}
+                      className="rounded-full px-8 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all"
                     >
                       대회 생성하기
                     </Button>
