@@ -54,13 +54,7 @@ export default function Home() {
           className="mb-8 h-24 w-auto drop-shadow-sm sm:h-32 lg:h-44"
         />
 
-        <h1 className="mb-4 text-4xl font-extrabold tracking-tight text-gray-900 sm:text-5xl lg:text-6xl">
-          Badminton Tournament <br className="hidden sm:block" />
-          <span className="text-transparent bg-clip-text bg-linear-to-r from-green-600 to-emerald-600">Management</span>
-        </h1>
-        <p className="mx-auto mb-10 max-w-2xl text-lg text-gray-600">
-          대회를 쉽고 간편하게 관리하세요. <br />선수 등록부터 대진표 생성까지, 드라이브가 함께합니다.
-        </p>
+
 
         {/* 검색창 */}
         <div className="flex w-full justify-center pb-12">
