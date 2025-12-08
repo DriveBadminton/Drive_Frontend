@@ -68,12 +68,7 @@ export default function Home() {
             <input
               type="text"
               placeholder="선수 이름 또는 대회 이름을 입력하세요."
-              className="
-                h-14 w-full rounded-full bg-white pl-14 pr-6
-                shadow-lg ring-1 ring-gray-200 transition-all
-                placeholder:text-gray-400
-                focus:outline-hidden focus:ring-2 focus:ring-green-500 focus:shadow-green-100
-              "
+              className="h-14 w-full rounded-full bg-white pl-14 pr-6 shadow-lg ring-1 ring-gray-200 transition-all placeholder:text-gray-400 focus:outline-hidden focus:ring-2 focus:ring-green-500 focus:shadow-green-100"
               aria-label="검색"
             />
             <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-green-500 transition-colors">
