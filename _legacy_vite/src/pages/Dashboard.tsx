@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Icon from "../components/Icon";
+import { Button } from "../components/Button";
 import PageShell from "../components/layout/PageShell";
 
 interface Tournament {
@@ -44,30 +45,33 @@ export default function CourtManager() {
           <section className="lg:col-span-2 rounded-3xl border border-white/40 bg-white/80 p-6 shadow-sm backdrop-blur">
             <h2 className="mb-6 text-xl font-semibold text-gray-900">대회 관리</h2>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                fullWidth
                 onClick={() => navigate("/create-tournament")}
-                className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-5 text-sm font-semibold text-white shadow transition-transform hover:-translate-y-0.5"
+                className="gap-2 py-4"
               >
                 <Icon name="plus" className="h-5 w-5" />
                 대회 생성하기
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="primary"
+                fullWidth
                 onClick={() => navigate("/tournament-search")}
-                className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-5 text-sm font-semibold text-white shadow transition-transform hover:-translate-y-0.5"
+                className="gap-2 py-4 bg-emerald-500 hover:bg-emerald-600 from-transparent to-transparent shadow-emerald-500/30"
               >
                 <Icon name="user-add" className="h-5 w-5" />
                 대회 참여하기
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="secondary"
+                fullWidth
                 onClick={() => navigate("/tournament-search")}
-                className="flex items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-white px-4 py-5 text-sm font-semibold text-blue-600 transition-transform hover:-translate-y-0.5 hover:border-blue-300"
+                className="gap-2 py-4 text-gray-600 border-gray-200 hover:border-gray-300"
               >
                 <Icon name="checklist" className="h-5 w-5" />
                 대회 목록 보기
-              </button>
+              </Button>
             </div>
           </section>
 

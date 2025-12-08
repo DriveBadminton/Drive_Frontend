@@ -1,25 +1,25 @@
-import type {ReactNode} from "react";
+import type { ReactNode } from "react";
 import MainHeader from "./MainHeader";
 import MainFooter from "./MainFooter";
 
 interface PageShellProps {
-  children: ReactNode;
-  mainClassName?: string;
-  disableFooter?: boolean;
-  disableHeader?: boolean;
+    children: ReactNode;
+    mainClassName?: string;
+    disableFooter?: boolean;
+    disableHeader?: boolean;
 }
 
 export default function PageShell({
-  children,
-  mainClassName,
-  disableFooter = false,
-  disableHeader = false,
+    children,
+    mainClassName,
+    disableFooter = false,
+    disableHeader = false,
 }: PageShellProps) {
-  return (
-    <div className="min-h-screen bg-white text-gray-900">
-      {!disableHeader && <MainHeader />}
-      <main className={mainClassName ? `flex-1 ${mainClassName}` : "flex-1"}>{children}</main>
-      {!disableFooter && <MainFooter />}
-    </div>
-  );
+    return (
+        <div className="min-h-screen bg-white text-gray-900">
+            {!disableHeader && <MainHeader />}
+            <main className={mainClassName ? `flex-1 ${mainClassName}` : "flex-1"}>{children}</main>
+            {!disableFooter && <MainFooter />}
+        </div>
+    );
 }
