@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { getGoogleOAuthURL, getKakaoOAuthURL } from "@/lib/auth";
+import { useAuth } from "@/hooks/useAuth";
 
 interface NavItem {
   label: string;
@@ -19,6 +21,15 @@ export default function MainHeader() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isLoginHovered, setIsLoginHovered] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, isLoggedIn, logout } = useAuth();
+
+  const handleLogout = async () => {
+    const success = await logout();
+    if (success) {
+      router.push("/");
+    }
+  };
 
   return (
     <header className="flex-none sticky top-0 z-50 border-border bg-background-secondary">
@@ -40,14 +51,19 @@ export default function MainHeader() {
           />
         </Link>
 
-        <nav className="hidden flex-1 items-center justify-center gap-8 text-sm font-medium text-foreground-muted lg:flex">
-          {NAV_ITEMS.map((item) => {
+        <nav
+          className="hidden flex-1 items-center justify-center gap-8 text-sm font-medium text-foreground-muted lg:flex"
+          role="navigation"
+          aria-label="메인 네비게이션"
+        >
+          {NAV_ITEMS.map((item, index) => {
             if (item.href) {
               return (
                 <a
                   key={item.label}
                   href={item.href}
-                  className="transition-colors hover:text-foreground"
+                  tabIndex={0}
+                  className="transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md px-2 py-1"
                 >
                   {item.label}
                 </a>
@@ -59,7 +75,8 @@ export default function MainHeader() {
                 <a
                   key={item.label}
                   href={item.to}
-                  className="transition-colors hover:text-foreground"
+                  tabIndex={0}
+                  className="transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-md px-2 py-1"
                 >
                   {item.label}
                 </a>
@@ -75,7 +92,8 @@ export default function MainHeader() {
               <Link
                 key={item.label}
                 href={item.to ?? "/"}
-                className={`transition-colors hover:text-foreground ${
+                tabIndex={0}
+                className={`transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-md px-2 py-1 ${
                   isActive ? "text-foreground font-semibold" : ""
                 }`}
               >
@@ -91,14 +109,24 @@ export default function MainHeader() {
             className="relative"
             onMouseEnter={() => setIsLoginHovered(true)}
             onMouseLeave={() => setIsLoginHovered(false)}
+            onFocus={() => setIsLoginHovered(true)}
+            onBlur={(e) => {
+              // 포커스가 드롭다운 외부로 이동했을 때만 닫기
+              if (!e.currentTarget.contains(e.relatedTarget)) {
+                setIsLoginHovered(false);
+              }
+            }}
           >
             <button
-              className={`flex items-center justify-center rounded-lg p-2 text-foreground-muted transition-colors focus:outline-none ${
+              tabIndex={0}
+              className={`flex items-center justify-center rounded-lg p-2 text-foreground-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                 isLoginHovered
                   ? "rounded-b-none bg-background"
                   : "hover:bg-background"
               }`}
-              aria-label="로그인"
+              aria-label={isLoggedIn ? "사용자 메뉴" : "로그인 메뉴"}
+              aria-expanded={isLoginHovered}
+              aria-haspopup="true"
             >
               <img
                 src="/user-icon.svg"
@@ -109,31 +137,99 @@ export default function MainHeader() {
 
             {/* 드롭다운 메뉴 */}
             <div
+              role="menu"
+              aria-label={isLoggedIn ? "사용자 메뉴" : "로그인 메뉴"}
               className={`absolute right-0 top-full transition-all duration-200 ${
                 isLoginHovered
                   ? "opacity-100 visible"
                   : "opacity-0 invisible pointer-events-none"
               }`}
             >
-              <div className="w-56 rounded-lg rounded-tr-none bg-background p-2 shadow-lg ">
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground-muted/10"
-                >
-                  <img src="/talk.png" alt="Kakao" className="h-5 w-5" />
-                  카카오로 로그인
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground-muted/10"
-                >
-                  <img
-                    src="/google-icon.svg"
-                    alt="Google"
-                    className="h-5 w-5"
-                  />
-                  구글로 로그인
-                </button>
+              <div className="w-56 rounded-lg rounded-tr-none bg-background p-2 shadow-lg">
+                {isLoggedIn ? (
+                  <>
+                    {/* 로그인 상태: 마이페이지, 로그아웃 */}
+                    <Link
+                      href="/mypage"
+                      role="menuitem"
+                      tabIndex={0}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground-muted/10 focus-visible:bg-foreground-muted/10 focus-visible:outline-none"
+                    >
+                      <svg
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                        />
+                      </svg>
+                      마이페이지
+                    </Link>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      tabIndex={0}
+                      onClick={handleLogout}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground-muted/10 focus-visible:bg-foreground-muted/10 focus-visible:outline-none"
+                    >
+                      <svg
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                        />
+                      </svg>
+                      로그아웃
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {/* 비로그인 상태: 소셜 로그인 */}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      tabIndex={0}
+                      onClick={() => {
+                        window.location.href = getKakaoOAuthURL();
+                      }}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground-muted/10 focus-visible:bg-foreground-muted/10 focus-visible:outline-none"
+                    >
+                      <img
+                        src="/kakaotalk.png"
+                        alt="Kakao"
+                        className="h-5 w-5"
+                      />
+                      카카오로 로그인
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      tabIndex={0}
+                      onClick={() => {
+                        window.location.href = getGoogleOAuthURL();
+                      }}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground-muted/10 focus-visible:bg-foreground-muted/10 focus-visible:outline-none"
+                    >
+                      <img
+                        src="/google-icon.svg"
+                        alt="Google"
+                        className="h-5 w-5"
+                      />
+                      구글로 로그인
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -141,7 +237,7 @@ export default function MainHeader() {
 
         <button
           type="button"
-          className="inline-flex items-center justify-center rounded-md border border-border p-2 text-foreground-muted transition-colors hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 lg:hidden"
+          className="inline-flex items-center justify-center rounded-md border border-border p-2 text-foreground-muted transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 lg:hidden"
           aria-label="메뉴 열기"
           onClick={() => setIsMenuOpen((prev) => !prev)}
         >
