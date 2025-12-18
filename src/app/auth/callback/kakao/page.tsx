@@ -2,10 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { sendAuthCodeToBackend } from "@/lib/auth";
+import {
+  getAccountStatus,
+  getOAuthRedirectUri,
+  loginWithOAuth,
+} from "@/lib/auth";
 
 // 🔧 임시 테스트 모드 (백엔드 없이 테스트할 때 true로 변경)
-const MOCK_MODE = true;
+const MOCK_MODE = false;
 
 export default function KakaoCallbackPage() {
   const router = useRouter();
@@ -14,6 +18,9 @@ export default function KakaoCallbackPage() {
     "loading"
   );
   const [errorMessage, setErrorMessage] = useState("");
+  const [loadingMessage, setLoadingMessage] =
+    useState("카카오 로그인 처리 중...");
+  const [suppressUi, setSuppressUi] = useState(false);
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -38,22 +45,50 @@ export default function KakaoCallbackPage() {
       if (MOCK_MODE) {
         console.log("🔧 Mock Mode: 카카오 인가 코드 수신:", code);
         localStorage.setItem("mock_logged_in", "true");
-        setStatus("success");
-        setTimeout(() => {
-          router.push("/");
-        }, 1500);
+        // 신규 가입 플로우 테스트용 (기본: PENDING)
+        if (!localStorage.getItem("mock_user_status")) {
+          localStorage.setItem("mock_user_status", "PENDING");
+          localStorage.setItem("mock_has_profile", "false");
+        }
+        const mockStatus = localStorage.getItem("mock_user_status");
+        const mockHasProfile =
+          localStorage.getItem("mock_has_profile") === "true";
+        if (mockStatus === "PENDING" || !mockHasProfile) {
+          // 첫 로그인 유저는 콜백 화면을 거의 표시하지 않고 즉시 프로필 입력으로 이동
+          setSuppressUi(true);
+          router.replace("/account/profile");
+        } else {
+          setStatus("success");
+          router.push("/home");
+        }
         return;
       }
 
-      // 백엔드로 인가 코드 전송
-      const result = await sendAuthCodeToBackend("kakao", code);
+      // 1) OAuth 로그인: /auth/login 호출
+      const result = await loginWithOAuth({
+        provider: "kakao",
+        authorizationCode: code,
+        redirectUri: getOAuthRedirectUri("kakao"),
+      });
 
       if (result.success) {
+        // 2) 로그인 성공 후 상태 확인: /account/status
+        const accountStatus = await getAccountStatus();
+
+        if (
+          accountStatus &&
+          (accountStatus.status === "PENDING" || !accountStatus.hasProfile)
+        ) {
+          // 첫 로그인 유저는 콜백 화면을 거의 표시하지 않고 즉시 프로필 입력으로 이동
+          setSuppressUi(true);
+          router.replace("/account/profile");
+          return;
+        }
+
         setStatus("success");
-        // 잠시 후 메인 페이지로 이동
         setTimeout(() => {
-          router.push("/");
-        }, 1500);
+          router.push("/home");
+        }, 800);
       } else {
         setStatus("error");
         setErrorMessage(result.error || "로그인에 실패했습니다.");
@@ -62,6 +97,8 @@ export default function KakaoCallbackPage() {
 
     handleCallback();
   }, [searchParams, router]);
+
+  if (suppressUi) return null;
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center">
@@ -72,7 +109,7 @@ export default function KakaoCallbackPage() {
               <div className="h-12 w-12 mx-auto rounded-full border-4 border-yellow-400 border-t-transparent animate-spin" />
             </div>
             <h1 className="text-xl font-semibold text-foreground">
-              카카오 로그인 처리 중...
+              {loadingMessage}
             </h1>
             <p className="mt-2 text-foreground-muted">잠시만 기다려주세요.</p>
           </>

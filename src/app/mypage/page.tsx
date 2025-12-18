@@ -1,13 +1,61 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import PageShell from "@/components/layout/PageShell";
 
+type MockProfile = {
+  nickname?: string;
+  region?: string;
+  localGrade?: string;
+  nationalGrade?: string;
+  birthDate?: string; // YYYY-MM-DD
+};
+
+function calcAgeGroup(birthDate?: string): string | null {
+  if (!birthDate) return null;
+  const m = birthDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const dob = new Date(y, mo, d);
+  if (Number.isNaN(dob.getTime())) return null;
+
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const hadBirthdayThisYear =
+    now.getMonth() > dob.getMonth() ||
+    (now.getMonth() === dob.getMonth() && now.getDate() >= dob.getDate());
+  if (!hadBirthdayThisYear) age -= 1;
+
+  const decade = Math.floor(age / 10) * 10;
+  if (decade <= 0) return null;
+  return `${decade}대`;
+}
+
 export default function MyPage() {
   const router = useRouter();
   const { user, isLoggedIn, isLoading, logout } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+
+  const mockProfile: MockProfile | null = useMemo(() => {
+    try {
+      const raw = localStorage.getItem("mock_profile");
+      if (!raw) return null;
+      return JSON.parse(raw) as MockProfile;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const displayNickname = mockProfile?.nickname || user?.name || "사용자";
+  const displayRegion = mockProfile?.region || "-";
+  const displayLocalGrade = mockProfile?.localGrade || "급수 없음";
+  const displayNationalGrade = mockProfile?.nationalGrade || "급수 없음";
+  const displayAgeGroup = calcAgeGroup(mockProfile?.birthDate) || "-";
 
   // 로그인하지 않은 경우 메인 페이지로 리다이렉트
   useEffect(() => {
@@ -16,11 +64,45 @@ export default function MyPage() {
     }
   }, [isLoading, isLoggedIn, router]);
 
+  // Mock 프로필 이미지 로드
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("mock_profile_image");
+      if (saved) setProfileImage(saved);
+    } catch {}
+  }, []);
+
   const handleLogout = async () => {
     const success = await logout();
     if (success) {
       router.push("/");
     }
+  };
+
+  const handleProfileImageClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleProfileImageChange = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      setProfileImage(dataUrl);
+      try {
+        localStorage.setItem("mock_profile_image", dataUrl);
+      } catch {}
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleEditProfile = () => {
+    router.push("/account/edit?returnTo=/mypage");
   };
 
   // 로딩 중
@@ -48,36 +130,72 @@ export default function MyPage() {
         <div className="rounded-2xl bg-background-secondary p-6 sm:p-8 ring-1 ring-border">
           <div className="flex flex-col sm:flex-row items-center gap-6">
             {/* 프로필 이미지 */}
-            <div className="h-24 w-24 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden">
-              {user?.profileImage ? (
-                <img
-                  src={user.profileImage}
-                  alt="프로필"
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <svg
-                  className="h-12 w-12 text-primary"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+            <div className="relative">
+              <button
+                type="button"
+                onClick={handleProfileImageClick}
+                className="h-24 w-24 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden ring-1 ring-border transition-colors hover:bg-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                aria-label="프로필 이미지 변경"
+              >
+                {profileImage || user?.profileImage ? (
+                  <img
+                    src={profileImage || user?.profileImage || ""}
+                    alt="프로필"
+                    className="h-full w-full object-cover"
                   />
-                </svg>
-              )}
+                ) : (
+                  <svg
+                    className="h-12 w-12 text-primary"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                    />
+                  </svg>
+                )}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleProfileImageChange}
+                className="hidden"
+              />
+              <p className="mt-2 text-xs text-foreground-muted text-center select-none">
+                이미지 변경
+              </p>
             </div>
 
             {/* 사용자 정보 */}
             <div className="text-center sm:text-left">
               <h2 className="text-2xl font-semibold text-foreground">
-                {user?.name || "사용자"}
+                {displayNickname}
               </h2>
-              <p className="text-foreground-muted mt-1">{user?.email}</p>
+              <div className="mt-4 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 ring-1 ring-border">
+                  <span className="text-foreground-muted">지역</span>
+                  <span className="text-foreground">{displayRegion}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 ring-1 ring-border">
+                  <span className="text-foreground-muted">연령대</span>
+                  <span className="text-foreground">{displayAgeGroup}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 ring-1 ring-border">
+                  <span className="text-foreground-muted">지역급수</span>
+                  <span className="text-foreground">{displayLocalGrade}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 ring-1 ring-border">
+                  <span className="text-foreground-muted">전국급수</span>
+                  <span className="text-foreground">
+                    {displayNationalGrade}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -86,7 +204,10 @@ export default function MyPage() {
 
           {/* 메뉴 */}
           <div className="space-y-2">
-            <button className="w-full flex items-center gap-3 rounded-lg px-4 py-3 text-left text-foreground transition-colors hover:bg-background">
+            <button
+              onClick={handleEditProfile}
+              className="w-full flex items-center gap-3 rounded-lg px-4 py-3 text-left text-foreground transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
               <svg
                 className="h-5 w-5 text-foreground-muted"
                 fill="none"
@@ -106,24 +227,7 @@ export default function MyPage() {
                   d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                 />
               </svg>
-              <span>계정 설정</span>
-            </button>
-
-            <button className="w-full flex items-center gap-3 rounded-lg px-4 py-3 text-left text-foreground transition-colors hover:bg-background">
-              <svg
-                className="h-5 w-5 text-foreground-muted"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                />
-              </svg>
-              <span>내 대회 기록</span>
+              <span>정보 수정</span>
             </button>
 
             <button
