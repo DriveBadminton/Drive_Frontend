@@ -13,9 +13,9 @@ export default function Home() {
   const tournamentsSectionRef = useRef<HTMLElement | null>(null);
 
   const tournamentSections = [
-    { id: "current-tournaments", title: "진행 중인 대회 🏸", type: "current" },
-    { id: "upcoming-tournaments", title: "예정된 대회 📅", type: "upcoming" },
-    { id: "finished-tournaments", title: "종료된 대회 🏆", type: "finished" },
+    { id: "current-tournaments", title: "진행 중인 대회", type: "current" },
+    { id: "upcoming-tournaments", title: "예정된 대회", type: "upcoming" },
+    { id: "finished-tournaments", title: "종료된 대회", type: "finished" },
   ];
 
   const placeholderCards: any[] = []; // Start with empty state to show the improvement
@@ -56,7 +56,8 @@ export default function Home() {
 
         {/* 검색창 */}
         <div className="flex w-full justify-center pb-12">
-          <div className="relative w-full max-w-2xl group">
+          <div className="relative w-full max-w-2xl transform transition-all hover:scale-105">
+            <div className="absolute inset-0 -z-10 rounded-full bg-white/40 blur-xl"></div>
             <input
               type="text"
               placeholder="선수 이름 또는 대회 이름을 입력하세요."
