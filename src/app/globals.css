@@ -38,3 +38,55 @@ body {
   color: var(--color-foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Number input 스핀 버튼 스타일링 */
+input[type="number"] {
+  -moz-appearance: textfield; /* Firefox에서 기본 스핀 버튼 제거 */
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+/* 커스텀 스핀 버튼이 있는 number input */
+.number-input-custom::-webkit-inner-spin-button,
+.number-input-custom::-webkit-outer-spin-button {
+  -webkit-appearance: inner-spin-button;
+  opacity: 0.7;
+  width: 20px;
+  height: 20px;
+}
+
+/* 커스텀 스크롤바 스타일 (테마에 맞춤) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(114, 26, 231, 0.5); /* primary color with opacity */
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(
+    114,
+    26,
+    231,
+    0.7
+  ); /* primary color with higher opacity on hover */
+}
+
+/* Firefox */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(114, 26, 231, 0.5) rgba(255, 255, 255, 0.05);
+}

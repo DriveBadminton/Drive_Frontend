@@ -3,13 +3,10 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  getAccountStatus,
+  getCurrentUser,
   getOAuthRedirectUri,
   loginWithOAuth,
 } from "@/lib/auth";
-
-// 🔧 임시 테스트 모드 (백엔드 없이 테스트할 때 true로 변경)
-const MOCK_MODE = false;
 
 export default function KakaoCallbackPage() {
   const router = useRouter();
@@ -41,50 +38,37 @@ export default function KakaoCallbackPage() {
         return;
       }
 
-      // 🔧 Mock 모드: 백엔드 호출 없이 바로 로그인 성공 처리
-      if (MOCK_MODE) {
-        console.log("🔧 Mock Mode: 카카오 인가 코드 수신:", code);
-        localStorage.setItem("mock_logged_in", "true");
-        // 신규 가입 플로우 테스트용 (기본: PENDING)
-        if (!localStorage.getItem("mock_user_status")) {
-          localStorage.setItem("mock_user_status", "PENDING");
-          localStorage.setItem("mock_has_profile", "false");
-        }
-        const mockStatus = localStorage.getItem("mock_user_status");
-        const mockHasProfile =
-          localStorage.getItem("mock_has_profile") === "true";
-        if (mockStatus === "PENDING" || !mockHasProfile) {
-          // 첫 로그인 유저는 콜백 화면을 거의 표시하지 않고 즉시 프로필 입력으로 이동
-          setSuppressUi(true);
-          router.replace("/account/profile");
-        } else {
-          setStatus("success");
-          router.push("/home");
-        }
-        return;
-      }
-
       // 1) OAuth 로그인: /auth/login 호출
       const result = await loginWithOAuth({
-        provider: "kakao",
+        provider: "KAKAO",
         authorizationCode: code,
-        redirectUri: getOAuthRedirectUri("kakao"),
+        redirectUri: getOAuthRedirectUri("KAKAO"),
       });
 
       if (result.success) {
-        // 2) 로그인 성공 후 상태 확인: /account/status
-        const accountStatus = await getAccountStatus();
+        if (!result.accessToken) {
+          setStatus("error");
+          setErrorMessage("액세스 토큰을 받지 못했습니다.");
+          return;
+        }
 
-        if (
-          accountStatus &&
-          (accountStatus.status === "PENDING" || !accountStatus.hasProfile)
-        ) {
+        // 2) 로그인 성공 후 상태 확인: /users/me (액세스 토큰 포함)
+        const userData = await getCurrentUser(result.accessToken);
+
+        if (!userData) {
+          setStatus("error");
+          setErrorMessage("사용자 정보를 가져올 수 없습니다.");
+          return;
+        }
+
+        if (userData.status === "PENDING") {
           // 첫 로그인 유저는 콜백 화면을 거의 표시하지 않고 즉시 프로필 입력으로 이동
           setSuppressUi(true);
           router.replace("/account/profile");
           return;
         }
 
+        // ACTIVE 상태인 경우 메인 화면으로 이동
         setStatus("success");
         setTimeout(() => {
           router.push("/home");

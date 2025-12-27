@@ -1,17 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import PageShell from "@/components/layout/PageShell";
-
-type MockProfile = {
-  nickname?: string;
-  region?: string;
-  localGrade?: string;
-  nationalGrade?: string;
-  birthDate?: string; // YYYY-MM-DD
-};
 
 function calcAgeGroup(birthDate?: string): string | null {
   if (!birthDate) return null;
@@ -41,21 +33,13 @@ export default function MyPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [profileImage, setProfileImage] = useState<string | null>(null);
 
-  const mockProfile: MockProfile | null = useMemo(() => {
-    try {
-      const raw = localStorage.getItem("mock_profile");
-      if (!raw) return null;
-      return JSON.parse(raw) as MockProfile;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const displayNickname = mockProfile?.nickname || user?.name || "사용자";
-  const displayRegion = mockProfile?.region || "-";
-  const displayLocalGrade = mockProfile?.localGrade || "급수 없음";
-  const displayNationalGrade = mockProfile?.nationalGrade || "급수 없음";
-  const displayAgeGroup = calcAgeGroup(mockProfile?.birthDate) || "-";
+  const displayNickname = user?.name || "사용자";
+  const displayRegion =
+    user?.provinceName && user?.districtName
+      ? `${user.provinceName} ${user.districtName}`
+      : "-";
+  const displayGrade = user?.grade || "급수 없음";
+  const displayAgeGroup = "-"; // TODO: birthDate가 User 타입에 추가되면 사용
 
   // 로그인하지 않은 경우 메인 페이지로 리다이렉트
   useEffect(() => {
@@ -63,14 +47,6 @@ export default function MyPage() {
       router.push("/");
     }
   }, [isLoading, isLoggedIn, router]);
-
-  // Mock 프로필 이미지 로드
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("mock_profile_image");
-      if (saved) setProfileImage(saved);
-    } catch {}
-  }, []);
 
   const handleLogout = async () => {
     const success = await logout();
@@ -94,9 +70,7 @@ export default function MyPage() {
     reader.onload = () => {
       const dataUrl = String(reader.result || "");
       setProfileImage(dataUrl);
-      try {
-        localStorage.setItem("mock_profile_image", dataUrl);
-      } catch {}
+      // TODO: 프로필 이미지 업로드 API 호출
     };
     reader.readAsDataURL(file);
   };
@@ -186,14 +160,8 @@ export default function MyPage() {
                   <span className="text-foreground">{displayAgeGroup}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 ring-1 ring-border">
-                  <span className="text-foreground-muted">지역급수</span>
-                  <span className="text-foreground">{displayLocalGrade}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 ring-1 ring-border">
-                  <span className="text-foreground-muted">전국급수</span>
-                  <span className="text-foreground">
-                    {displayNationalGrade}
-                  </span>
+                  <span className="text-foreground-muted">급수</span>
+                  <span className="text-foreground">{displayGrade}</span>
                 </div>
               </div>
             </div>

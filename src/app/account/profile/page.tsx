@@ -3,7 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import PageShell from "@/components/layout/PageShell";
-import { submitUserProfile } from "@/lib/auth";
+import {
+  submitUserProfile,
+  getProfilePrefill,
+  getProvinces,
+  getDistricts,
+  Province,
+  District,
+} from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
 import Select from "@/components/Select";
 
@@ -11,8 +18,10 @@ type FormState = {
   nickname: string;
   localGrade: string;
   nationalGrade: string;
-  region: string;
+  provinceId: string;
+  districtId: string;
   birthDate: string;
+  gender: string;
 };
 
 export default function AccountProfilePage() {
@@ -23,11 +32,16 @@ export default function AccountProfilePage() {
     nickname: "",
     localGrade: "",
     nationalGrade: "",
-    region: "",
+    provinceId: "",
+    districtId: "",
     birthDate: "",
+    gender: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [provinces, setProvinces] = useState<Province[]>([]);
+  const [districts, setDistricts] = useState<District[]>([]);
+  const [isLoadingDistricts, setIsLoadingDistricts] = useState(false);
 
   const formatBirthDate = (raw: string) => {
     const digits = raw.replace(/\D/g, "").slice(0, 8);
@@ -53,10 +67,16 @@ export default function AccountProfilePage() {
 
   const validationError = useMemo(() => {
     if (!form.nickname.trim()) return "닉네임은 필수입니다.";
-    if (!form.region.trim()) return "지역은 필수입니다.";
-    if (form.birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(form.birthDate)) {
+    if (!form.districtId.trim()) return "지역은 필수입니다.";
+    if (!form.birthDate.trim()) return "생년월일은 필수입니다.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.birthDate)) {
       return "생년월일 형식이 올바르지 않습니다. (YYYY-MM-DD)";
     }
+    // gender가 MALE 또는 FEMALE인지 확인
+    if (form.gender && !["MALE", "FEMALE"].includes(form.gender)) {
+      return "성별은 남성 또는 여성만 선택 가능합니다.";
+    }
+    if (!form.gender.trim()) return "성별은 필수입니다.";
     return "";
   }, [form]);
 
@@ -66,6 +86,51 @@ export default function AccountProfilePage() {
     }
   }, [isLoading, isLoggedIn, router]);
 
+  // Prefill 데이터 및 지역 목록 로드
+  useEffect(() => {
+    if (!isLoading && isLoggedIn) {
+      // 1. Prefill 데이터 가져오기
+      const loadPrefill = async () => {
+        const prefill = await getProfilePrefill();
+        if (prefill?.suggestedNickname) {
+          setForm((prev) => ({
+            ...prev,
+            nickname: prefill.suggestedNickname!,
+          }));
+        }
+      };
+
+      // 2. 시/도 목록 가져오기
+      const loadProvinces = async () => {
+        const provincesList = await getProvinces();
+        setProvinces(Array.isArray(provincesList) ? provincesList : []);
+      };
+
+      loadPrefill();
+      loadProvinces();
+    }
+  }, [isLoading, isLoggedIn]);
+
+  // 시/도 선택 시 시/군/구 목록 로드
+  useEffect(() => {
+    if (!form.provinceId) {
+      setDistricts([]);
+      setForm((prev) => ({ ...prev, districtId: "" }));
+      return;
+    }
+
+    const loadDistricts = async () => {
+      setIsLoadingDistricts(true);
+      const districtsList = await getDistricts(form.provinceId);
+      setDistricts(districtsList);
+      setIsLoadingDistricts(false);
+      // 시/도 변경 시 districtId 초기화
+      setForm((prev) => ({ ...prev, districtId: "" }));
+    };
+
+    loadDistricts();
+  }, [form.provinceId]);
+
   const onSubmit = async () => {
     setErrorMessage("");
 
@@ -74,38 +139,20 @@ export default function AccountProfilePage() {
       return;
     }
 
-    // ✅ Mock 모드: 백엔드 없이도 회원가입 완료 흐름을 테스트할 수 있도록 처리
-    // (현재 프로젝트는 mock_logged_in을 localStorage에 저장해두는 방식으로 임시 로그인 중)
-    const isMock =
-      typeof window !== "undefined" &&
-      localStorage.getItem("mock_logged_in") === "true";
-
-    if (isMock) {
-      try {
-        const payload = {
-          nickname: form.nickname.trim(),
-          region: form.region.trim(),
-          localGrade: form.localGrade || undefined,
-          nationalGrade: form.nationalGrade || undefined,
-          birthDate: form.birthDate.trim() || undefined,
-        };
-        localStorage.setItem("mock_profile", JSON.stringify(payload));
-        localStorage.setItem("mock_has_profile", "true");
-        localStorage.setItem("mock_user_status", "ACTIVE");
-      } catch {}
-
-      await refetch();
-      router.push("/home");
-      return;
-    }
-
     setIsSubmitting(true);
+
+    // birthDate를 YYYYMMDD 형식으로 변환 (YYYY-MM-DD -> YYYYMMDD)
+    const birth = form.birthDate.replace(/-/g, "");
+
+    // grade: localGrade나 nationalGrade 중 하나를 선택 (우선순위: nationalGrade > localGrade)
+    const grade = form.nationalGrade || form.localGrade || undefined;
+
     const result = await submitUserProfile({
       nickname: form.nickname.trim(),
-      region: form.region.trim(),
-      localGrade: form.localGrade || undefined,
-      nationalGrade: form.nationalGrade || undefined,
-      birthDate: form.birthDate.trim() || undefined,
+      districtId: Number(form.districtId),
+      grade,
+      birth,
+      gender: form.gender.trim(),
     });
     setIsSubmitting(false);
 
@@ -113,12 +160,6 @@ export default function AccountProfilePage() {
       setErrorMessage(result.error || "프로필 저장에 실패했습니다.");
       return;
     }
-
-    // Mock 모드: 프로필 완료로 전환
-    try {
-      localStorage.setItem("mock_has_profile", "true");
-      localStorage.setItem("mock_user_status", "ACTIVE");
-    } catch {}
 
     await refetch();
     router.push("/home");
@@ -155,15 +196,54 @@ export default function AccountProfilePage() {
               <label className="text-sm font-medium text-foreground">
                 지역 <span className="text-primary">*</span>
               </label>
-              <input
-                value={form.region}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, region: e.target.value }))
-                }
-                className="mt-2 w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground shadow-sm placeholder:text-foreground-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                placeholder="예) 서울 / 수원 / 용인"
-                autoComplete="address-level1"
-              />
+              <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <Select
+                    value={form.provinceId}
+                    onChange={(v) =>
+                      setForm((prev) => ({ ...prev, provinceId: v }))
+                    }
+                    placeholder="시/도 선택"
+                    options={[
+                      { value: "", label: "시/도 선택" },
+                      ...(Array.isArray(provinces)
+                        ? provinces.map((p) => ({
+                            value: String(p.id),
+                            label: p.name,
+                          }))
+                        : []),
+                    ]}
+                  />
+                </div>
+                <div>
+                  <Select
+                    value={form.districtId}
+                    onChange={(v) =>
+                      setForm((prev) => ({ ...prev, districtId: v }))
+                    }
+                    placeholder={
+                      isLoadingDistricts
+                        ? "로딩 중..."
+                        : form.provinceId
+                        ? "시/군/구 선택"
+                        : "시/도를 먼저 선택하세요"
+                    }
+                    disabled={!form.provinceId || isLoadingDistricts}
+                    options={[
+                      {
+                        value: "",
+                        label: form.provinceId
+                          ? "시/군/구 선택"
+                          : "시/도를 먼저 선택하세요",
+                      },
+                      ...districts.map((d) => ({
+                        value: String(d.id),
+                        label: d.name,
+                      })),
+                    ]}
+                  />
+                </div>
+              </div>
             </div>
 
             <div>
@@ -219,7 +299,7 @@ export default function AccountProfilePage() {
 
             <div>
               <label className="text-sm font-medium text-foreground">
-                생년월일 <span className="text-foreground-muted">(선택)</span>
+                생년월일 <span className="text-primary">*</span>
               </label>
               <input
                 value={form.birthDate}
@@ -236,8 +316,26 @@ export default function AccountProfilePage() {
                 maxLength={10}
               />
               <p className="mt-2 text-xs text-foreground-muted">
-                생년월일은 선택이며, 공개 정책은 추후 설정할 수 있어요.
+                공개 정책은 추후 설정할 수 있어요.
               </p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-foreground">
+                성별 <span className="text-primary">*</span>
+              </label>
+              <div className="mt-2">
+                <Select
+                  value={form.gender}
+                  onChange={(v) => setForm((prev) => ({ ...prev, gender: v }))}
+                  placeholder="성별 선택"
+                  options={[
+                    { value: "", label: "성별 선택" },
+                    { value: "MALE", label: "남성" },
+                    { value: "FEMALE", label: "여성" },
+                  ]}
+                />
+              </div>
             </div>
 
             {errorMessage && (

@@ -188,7 +188,7 @@ export default function Select({
           aria-activedescendant={activeOptionId}
           tabIndex={-1}
           onKeyDown={onListKeyDown}
-          className="absolute z-50 mt-2 w-full rounded-xl border border-border bg-background-secondary p-1 shadow-lg outline-none"
+          className="absolute z-50 mt-2 w-full max-h-[280px] overflow-y-auto custom-scrollbar rounded-xl border border-border bg-background-secondary p-1 shadow-lg outline-none"
         >
           {options.map((opt, idx) => {
             const isSelected = opt.value === value;

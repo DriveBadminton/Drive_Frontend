@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import PageShell from "@/components/layout/PageShell";
-import { submitUserProfile } from "@/lib/auth";
+import {
+  submitUserProfile,
+  getProvinces,
+  getDistricts,
+  Province,
+  District,
+} from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
 import Select from "@/components/Select";
 
@@ -11,8 +17,10 @@ type FormState = {
   nickname: string;
   localGrade: string;
   nationalGrade: string;
-  region: string;
+  provinceId: string;
+  districtId: string;
   birthDate: string;
+  gender: string;
 };
 
 export default function AccountEditPage() {
@@ -24,8 +32,10 @@ export default function AccountEditPage() {
     nickname: "",
     localGrade: "",
     nationalGrade: "",
-    region: "",
+    provinceId: "",
+    districtId: "",
     birthDate: "",
+    gender: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -34,6 +44,9 @@ export default function AccountEditPage() {
     confirmIrreversible: false,
     confirmDataRemoval: false,
   });
+  const [provinces, setProvinces] = useState<Province[]>([]);
+  const [districts, setDistricts] = useState<District[]>([]);
+  const [isLoadingDistricts, setIsLoadingDistricts] = useState(false);
 
   const formatBirthDate = (raw: string) => {
     const digits = raw.replace(/\D/g, "").slice(0, 8);
@@ -59,9 +72,15 @@ export default function AccountEditPage() {
 
   const validationError = useMemo(() => {
     if (!form.nickname.trim()) return "닉네임은 필수입니다.";
-    if (!form.region.trim()) return "지역은 필수입니다.";
-    if (form.birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(form.birthDate)) {
+    if (!form.districtId.trim()) return "지역은 필수입니다.";
+    if (!form.birthDate.trim()) return "생년월일은 필수입니다.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.birthDate)) {
       return "생년월일 형식이 올바르지 않습니다. (YYYY-MM-DD)";
+    }
+    if (!form.gender.trim()) return "성별은 필수입니다.";
+    // gender가 MALE 또는 FEMALE인지 확인
+    if (form.gender && !["MALE", "FEMALE"].includes(form.gender)) {
+      return "성별은 남성 또는 여성만 선택 가능합니다.";
     }
     return "";
   }, [form]);
@@ -72,22 +91,35 @@ export default function AccountEditPage() {
     }
   }, [isLoading, isLoggedIn, router]);
 
-  // 기존 입력값 프리필 (Mock)
+  // 시/도 목록 로드
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("mock_profile");
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as any;
-      setForm((prev) => ({
-        ...prev,
-        nickname: parsed.nickname ?? prev.nickname,
-        region: parsed.region ?? prev.region,
-        localGrade: parsed.localGrade ?? prev.localGrade,
-        nationalGrade: parsed.nationalGrade ?? prev.nationalGrade,
-        birthDate: parsed.birthDate ?? prev.birthDate,
-      }));
-    } catch {}
-  }, []);
+    if (!isLoading && isLoggedIn) {
+      const loadProvinces = async () => {
+        const provincesList = await getProvinces();
+        setProvinces(Array.isArray(provincesList) ? provincesList : []);
+      };
+
+      loadProvinces();
+    }
+  }, [isLoading, isLoggedIn]);
+
+  // 시/도 선택 시 시/군/구 목록 로드
+  useEffect(() => {
+    if (!form.provinceId) {
+      setDistricts([]);
+      setForm((prev) => ({ ...prev, districtId: "" }));
+      return;
+    }
+
+    const loadDistricts = async () => {
+      setIsLoadingDistricts(true);
+      const districtsList = await getDistricts(form.provinceId);
+      setDistricts(districtsList);
+      setIsLoadingDistricts(false);
+    };
+
+    loadDistricts();
+  }, [form.provinceId]);
 
   const onSubmit = async () => {
     setErrorMessage("");
@@ -98,35 +130,21 @@ export default function AccountEditPage() {
     }
 
     const returnTo = searchParams.get("returnTo") || "/mypage";
-    const isMock =
-      typeof window !== "undefined" &&
-      localStorage.getItem("mock_logged_in") === "true";
-
-    if (isMock) {
-      try {
-        const payload = {
-          nickname: form.nickname.trim(),
-          region: form.region.trim(),
-          localGrade: form.localGrade || undefined,
-          nationalGrade: form.nationalGrade || undefined,
-          birthDate: form.birthDate.trim() || undefined,
-        };
-        localStorage.setItem("mock_profile", JSON.stringify(payload));
-      } catch {}
-
-      await refetch();
-      router.push(returnTo);
-      return;
-    }
-
     setIsSubmitting(true);
-    // NOTE: 백엔드에서 "정보 수정" 전용 endpoint(PUT/PATCH /users/profile)가 생기면 여기만 교체하면 됩니다.
+
+    // birthDate를 YYYYMMDD 형식으로 변환 (YYYY-MM-DD -> YYYYMMDD)
+    const birth = form.birthDate.replace(/-/g, "");
+
+    // grade: localGrade나 nationalGrade 중 하나를 선택 (우선순위: nationalGrade > localGrade)
+    const grade = form.nationalGrade || form.localGrade || undefined;
+
+    // NOTE: 백엔드에서 "정보 수정" 전용 endpoint(PUT/PATCH /users/me/profile)가 생기면 여기만 교체하면 됩니다.
     const result = await submitUserProfile({
       nickname: form.nickname.trim(),
-      region: form.region.trim(),
-      localGrade: form.localGrade || undefined,
-      nationalGrade: form.nationalGrade || undefined,
-      birthDate: form.birthDate.trim() || undefined,
+      districtId: Number(form.districtId),
+      grade,
+      birth,
+      gender: form.gender.trim(),
     });
     setIsSubmitting(false);
 
@@ -144,20 +162,6 @@ export default function AccountEditPage() {
 
   const handleWithdraw = async () => {
     if (!canWithdraw) return;
-
-    const isMock =
-      typeof window !== "undefined" &&
-      localStorage.getItem("mock_logged_in") === "true";
-
-    if (isMock) {
-      try {
-        localStorage.removeItem("mock_profile");
-        localStorage.removeItem("mock_profile_image");
-        localStorage.removeItem("mock_logged_in");
-        localStorage.removeItem("mock_user_status");
-        localStorage.removeItem("mock_has_profile");
-      } catch {}
-    }
 
     await logout();
     setIsWithdrawOpen(false);
@@ -193,15 +197,54 @@ export default function AccountEditPage() {
               <label className="text-sm font-medium text-foreground">
                 지역 <span className="text-primary">*</span>
               </label>
-              <input
-                value={form.region}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, region: e.target.value }))
-                }
-                className="mt-2 w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground shadow-sm placeholder:text-foreground-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                placeholder="예) 서울 / 수원 / 용인"
-                autoComplete="address-level1"
-              />
+              <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <Select
+                    value={form.provinceId}
+                    onChange={(v) =>
+                      setForm((prev) => ({ ...prev, provinceId: v }))
+                    }
+                    placeholder="시/도 선택"
+                    options={[
+                      { value: "", label: "시/도 선택" },
+                      ...(Array.isArray(provinces)
+                        ? provinces.map((p) => ({
+                            value: String(p.id),
+                            label: p.name,
+                          }))
+                        : []),
+                    ]}
+                  />
+                </div>
+                <div>
+                  <Select
+                    value={form.districtId}
+                    onChange={(v) =>
+                      setForm((prev) => ({ ...prev, districtId: v }))
+                    }
+                    placeholder={
+                      isLoadingDistricts
+                        ? "로딩 중..."
+                        : form.provinceId
+                        ? "시/군/구 선택"
+                        : "시/도를 먼저 선택하세요"
+                    }
+                    disabled={!form.provinceId || isLoadingDistricts}
+                    options={[
+                      {
+                        value: "",
+                        label: form.provinceId
+                          ? "시/군/구 선택"
+                          : "시/도를 먼저 선택하세요",
+                      },
+                      ...districts.map((d) => ({
+                        value: String(d.id),
+                        label: d.name,
+                      })),
+                    ]}
+                  />
+                </div>
+              </div>
             </div>
 
             <div>
@@ -257,7 +300,7 @@ export default function AccountEditPage() {
 
             <div>
               <label className="text-sm font-medium text-foreground">
-                생년월일 <span className="text-foreground-muted">(선택)</span>
+                생년월일 <span className="text-primary">*</span>
               </label>
               <input
                 value={form.birthDate}
@@ -274,8 +317,26 @@ export default function AccountEditPage() {
                 maxLength={10}
               />
               <p className="mt-2 text-xs text-foreground-muted">
-                생년월일은 선택이며, 공개 정책은 추후 설정할 수 있어요.
+                공개 정책은 추후 설정할 수 있어요.
               </p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-foreground">
+                성별 <span className="text-primary">*</span>
+              </label>
+              <div className="mt-2">
+                <Select
+                  value={form.gender}
+                  onChange={(v) => setForm((prev) => ({ ...prev, gender: v }))}
+                  placeholder="성별 선택"
+                  options={[
+                    { value: "", label: "성별 선택" },
+                    { value: "MALE", label: "남성" },
+                    { value: "FEMALE", label: "여성" },
+                  ]}
+                />
+              </div>
             </div>
 
             {errorMessage && (
