@@ -38,10 +38,21 @@ export default function GoogleCallbackPage() {
       }
 
       // 1) OAuth 로그인: /auth/login 호출
+      const redirectUri = getOAuthRedirectUri("GOOGLE");
+      console.log(
+        "[Callback] Google redirect URI before API call:",
+        redirectUri
+      );
+      console.log("[Callback] Full request payload:", {
+        provider: "GOOGLE",
+        authorizationCode: code,
+        redirectUri: redirectUri,
+      });
+
       const result = await loginWithOAuth({
         provider: "GOOGLE",
         authorizationCode: code,
-        redirectUri: getOAuthRedirectUri("GOOGLE"),
+        redirectUri: redirectUri, // 이미 가져온 redirectUri 사용
       });
 
       if (result.success) {
@@ -67,10 +78,10 @@ export default function GoogleCallbackPage() {
           return;
         }
 
-        // ACTIVE 상태인 경우 메인 화면으로 이동
+        // ACTIVE 상태인 경우 랜딩페이지로 이동
         setStatus("success");
         setTimeout(() => {
-          router.push("/home");
+          router.push("/");
         }, 800);
       } else {
         setStatus("error");
@@ -121,7 +132,7 @@ export default function GoogleCallbackPage() {
               로그인 성공!
             </h1>
             <p className="mt-2 text-foreground-muted">
-              메인 페이지로 이동합니다...
+              랜딩페이지로 이동합니다...
             </p>
           </>
         )}

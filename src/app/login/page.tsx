@@ -105,18 +105,6 @@ export default function Login() {
               <div className="space-y-3">
                 <button
                   type="button"
-                  className="flex w-full items-center justify-center gap-3 rounded-full border border-border bg-background px-4 py-3 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-background-secondary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <img
-                    src="/google-icon.svg"
-                    alt="Google"
-                    className="h-5 w-5"
-                  />
-                  Google 계정으로 계속하기
-                </button>
-
-                <button
-                  type="button"
                   className="flex w-full items-center justify-center gap-3 rounded-full border border-yellow-500/50 bg-[#FEE500] px-4 py-3 text-sm font-semibold text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-yellow-400/60"
                 >
                   <img src="/kakao-icon.svg" alt="Kakao" className="h-5 w-5" />

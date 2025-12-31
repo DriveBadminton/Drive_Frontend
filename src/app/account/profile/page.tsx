@@ -162,7 +162,7 @@ export default function AccountProfilePage() {
     }
 
     await refetch();
-    router.push("/home");
+    router.push("/"); // 회원가입 완료 후 랜딩페이지로 이동
   };
 
   return (

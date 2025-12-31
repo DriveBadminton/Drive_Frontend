@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { getGoogleOAuthURL, getKakaoOAuthURL } from "@/lib/auth";
+import { getKakaoOAuthURL } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
 
 interface NavItem {
@@ -211,22 +211,6 @@ export default function MainHeader() {
                         className="h-5 w-5"
                       />
                       카카오로 로그인
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      tabIndex={0}
-                      onClick={() => {
-                        window.location.href = getGoogleOAuthURL();
-                      }}
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground-muted/10 focus-visible:bg-foreground-muted/10 focus-visible:outline-none"
-                    >
-                      <img
-                        src="/google-icon.svg"
-                        alt="Google"
-                        className="h-5 w-5"
-                      />
-                      구글로 로그인
                     </button>
                   </>
                 )}

@@ -90,11 +90,45 @@ export function getKakaoOAuthURL(): string {
 }
 
 function getRedirectUriByProvider(provider: AuthProvider): string {
-  return provider === "GOOGLE" ? GOOGLE_REDIRECT_URI : KAKAO_REDIRECT_URI;
+  const redirectUri =
+    provider === "GOOGLE" ? GOOGLE_REDIRECT_URI : KAKAO_REDIRECT_URI;
+
+  // 디버깅: 리다이렉트 URI 값 확인
+  console.log(`[Auth] getRedirectUriByProvider(${provider}):`, redirectUri);
+  console.log(`[Auth] Redirect URI type:`, typeof redirectUri);
+  console.log(`[Auth] Redirect URI is undefined:`, redirectUri === undefined);
+  console.log(`[Auth] Redirect URI is null:`, redirectUri === null);
+
+  if (!redirectUri) {
+    console.error(`[Auth] ERROR: ${provider} redirect URI is ${redirectUri}`);
+    console.error(
+      `[Auth] Check environment variable: NEXT_PUBLIC_${provider}_REDIRECT_URI`
+    );
+    throw new Error(
+      `${provider} redirect URI is not configured. Please set NEXT_PUBLIC_${provider}_REDIRECT_URI environment variable.`
+    );
+  }
+
+  // URI 스킴 검증
+  if (
+    !redirectUri.startsWith("http://") &&
+    !redirectUri.startsWith("https://")
+  ) {
+    console.error(
+      `[Auth] ERROR: Redirect URI missing scheme (http:// or https://). Value: "${redirectUri}"`
+    );
+    throw new Error(
+      `Invalid redirect URI format: ${redirectUri}. Must start with http:// or https://`
+    );
+  }
+
+  return redirectUri;
 }
 
 export function getOAuthRedirectUri(provider: AuthProvider): string {
-  return getRedirectUriByProvider(provider);
+  const uri = getRedirectUriByProvider(provider);
+  console.log(`[Auth] getOAuthRedirectUri(${provider}) returning:`, uri);
+  return uri;
 }
 
 // 액세스 토큰 저장 (sessionStorage 사용)
@@ -119,12 +153,34 @@ export function removeAccessToken(): void {
 export async function loginWithOAuth(
   input: OAuthLoginRequest
 ): Promise<{ success: boolean; accessToken?: string; error?: string }> {
+  // 디버깅: 리다이렉트 URI 검증
+  console.log("[API] loginWithOAuth called with input:", input);
+  console.log("[API] Input redirectUri:", input.redirectUri);
+  console.log("[API] Input redirectUri type:", typeof input.redirectUri);
+  console.log("[API] Input redirectUri validation:", {
+    isUndefined: input.redirectUri === undefined,
+    isNull: input.redirectUri === null,
+    isEmpty: input.redirectUri === "",
+    hasHttp: input.redirectUri?.startsWith("http://"),
+    hasHttps: input.redirectUri?.startsWith("https://"),
+  });
+
   const url = `${API_URL}/auth/login`;
   const requestBody = JSON.stringify(input);
 
   console.log("[API] POST", url);
-  console.log("[API] Request body:", requestBody);
-  console.log("[API] Request payload:", input);
+  console.log("[API] Request body (JSON string):", requestBody);
+  console.log("[API] Request payload (object):", input);
+
+  // JSON 파싱 테스트로 실제 전송될 데이터 확인
+  try {
+    const parsed = JSON.parse(requestBody);
+    console.log("[API] Parsed request body:", parsed);
+    console.log("[API] Parsed redirectUri:", parsed.redirectUri);
+    console.log("[API] Parsed redirectUri type:", typeof parsed.redirectUri);
+  } catch (e) {
+    console.error("[API] Failed to parse request body:", e);
+  }
 
   try {
     const response = await fetch(url, {
@@ -241,18 +297,22 @@ export async function submitUserProfile(
 export async function getCurrentUser(
   accessToken?: string
 ): Promise<User | null> {
+  // 액세스 토큰이 제공되지 않으면 저장된 토큰 사용
+  const token = accessToken || getAccessToken();
+
+  // 토큰이 없으면 API 호출하지 않음 (비로그인 상태)
+  if (!token) {
+    console.log("[API] No access token found, skipping /users/me request");
+    return null;
+  }
+
   const url = `${API_URL}/users/me`;
   console.log("[API] GET", url);
 
   const headers: HeadersInit = {
     Accept: "application/json",
+    Authorization: `Bearer ${token}`,
   };
-
-  // 액세스 토큰이 제공되지 않으면 저장된 토큰 사용
-  const token = accessToken || getAccessToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
 
   try {
     const response = await fetch(url, {
@@ -304,23 +364,36 @@ export async function getCurrentUser(
 }
 
 // 로그아웃
+// 스펙: Refresh Token이 없어도 항상 성공 응답(idempotent)
+// 서버는 항상 200 응답을 반환하며, Set-Cookie로 refresh_token을 만료시킴
 export async function logout(): Promise<boolean> {
   try {
     const response = await fetch(`${API_URL}/auth/logout`, {
       method: "POST",
-      credentials: "include", // 쿠키 전송
+      credentials: "include", // 쿠키 전송 (Refresh Token Cookie)
     });
 
-    // 로그아웃 성공 시 저장된 액세스 토큰 제거
-    if (response.ok) {
-      removeAccessToken();
-    }
+    console.log(
+      "[API] Logout response status:",
+      response.status,
+      response.statusText
+    );
 
-    return response.ok;
+    // 스펙에 따르면 항상 200 응답을 반환하므로,
+    // 네트워크 에러가 아닌 이상 항상 성공으로 처리
+    // Access Token은 Stateless이므로 프론트엔드에서만 제거
+    removeAccessToken();
+
+    // Refresh Token Cookie는 서버에서 Set-Cookie로 만료 처리됨
+    // (Max-Age=0으로 즉시 만료)
+
+    return true; // idempotent: 항상 성공
   } catch (error) {
-    console.error("Logout error:", error);
-    removeAccessToken(); // 에러 발생 시에도 토큰 제거
-    return false;
+    // 네트워크 에러 등으로 요청 자체가 실패한 경우에도
+    // Access Token은 제거하고 성공으로 처리 (idempotent)
+    console.error("[API] Logout error:", error);
+    removeAccessToken();
+    return true; // idempotent: 항상 성공
   }
 }
 

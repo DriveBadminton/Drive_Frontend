@@ -68,10 +68,10 @@ export default function KakaoCallbackPage() {
           return;
         }
 
-        // ACTIVE 상태인 경우 메인 화면으로 이동
+        // ACTIVE 상태인 경우 랜딩페이지로 이동
         setStatus("success");
         setTimeout(() => {
-          router.push("/home");
+          router.push("/");
         }, 800);
       } else {
         setStatus("error");
@@ -122,7 +122,7 @@ export default function KakaoCallbackPage() {
               로그인 성공!
             </h1>
             <p className="mt-2 text-foreground-muted">
-              메인 페이지로 이동합니다...
+              랜딩페이지로 이동합니다...
             </p>
           </>
         )}

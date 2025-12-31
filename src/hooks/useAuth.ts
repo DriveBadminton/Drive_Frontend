@@ -6,6 +6,7 @@ import {
   User,
   getCurrentUser,
   logout as logoutApi,
+  getAccessToken,
 } from "@/lib/auth";
 
 export function useAuth() {
@@ -17,6 +18,16 @@ export function useAuth() {
   // 사용자 정보 가져오기
   const fetchUser = useCallback(async () => {
     setIsLoading(true);
+
+    // 액세스 토큰이 없으면 API 호출하지 않음 (비로그인 상태)
+    const token = getAccessToken();
+    if (!token) {
+      console.log("[useAuth] No access token, skipping user fetch");
+      setUser(null);
+      setAccountStatus(null);
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const userData = await getCurrentUser();
