@@ -1,12 +1,22 @@
 // Google OAuth 설정
-const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!;
-const GOOGLE_REDIRECT_URI = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI!;
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
+const GOOGLE_REDIRECT_URI = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI ?? "";
 
 // Kakao OAuth 설정
-const KAKAO_CLIENT_ID = process.env.NEXT_PUBLIC_KAKAO_CLIENT_ID!;
-const KAKAO_REDIRECT_URI = process.env.NEXT_PUBLIC_KAKAO_REDIRECT_URI!;
+const KAKAO_CLIENT_ID = process.env.NEXT_PUBLIC_KAKAO_CLIENT_ID ?? "";
+const KAKAO_REDIRECT_URI = process.env.NEXT_PUBLIC_KAKAO_REDIRECT_URI ?? "";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+// 개발 환경 확인
+const isDev = process.env.NODE_ENV === "development";
+
+// 개발 환경에서만 로깅하는 헬퍼 함수
+function debugLog(...args: unknown[]): void {
+  if (isDev) {
+    console.log(...args);
+  }
+}
 
 export type AuthProvider = "GOOGLE" | "KAKAO";
 
@@ -59,6 +69,13 @@ export interface UserProfileRequest {
 
 // Google OAuth URL 생성
 export function getGoogleOAuthURL(returnTo?: string): string {
+  // 환경 변수 검증
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
+    throw new Error(
+      "Google OAuth 설정이 누락되었습니다. NEXT_PUBLIC_GOOGLE_CLIENT_ID와 NEXT_PUBLIC_GOOGLE_REDIRECT_URI 환경 변수를 확인해주세요."
+    );
+  }
+
   const rootUrl = "https://accounts.google.com/o/oauth2/v2/auth";
 
   // returnTo가 제공되면 sessionStorage에 저장
@@ -88,6 +105,13 @@ export function getKakaoOAuthURL(
   returnTo?: string,
   forceLogin: boolean = false
 ): string {
+  // 환경 변수 검증
+  if (!KAKAO_CLIENT_ID || !KAKAO_REDIRECT_URI) {
+    throw new Error(
+      "Kakao OAuth 설정이 누락되었습니다. NEXT_PUBLIC_KAKAO_CLIENT_ID와 NEXT_PUBLIC_KAKAO_REDIRECT_URI 환경 변수를 확인해주세요."
+    );
+  }
+
   const rootUrl = "https://kauth.kakao.com/oauth/authorize";
 
   // returnTo가 제공되면 sessionStorage에 저장
@@ -114,11 +138,11 @@ function getRedirectUriByProvider(provider: AuthProvider): string {
   const redirectUri =
     provider === "GOOGLE" ? GOOGLE_REDIRECT_URI : KAKAO_REDIRECT_URI;
 
-  // 디버깅: 리다이렉트 URI 값 확인
-  console.log(`[Auth] getRedirectUriByProvider(${provider}):`, redirectUri);
-  console.log(`[Auth] Redirect URI type:`, typeof redirectUri);
-  console.log(`[Auth] Redirect URI is undefined:`, redirectUri === undefined);
-  console.log(`[Auth] Redirect URI is null:`, redirectUri === null);
+  // 디버깅: 리다이렉트 URI 값 확인 (개발 환경에서만)
+  debugLog(`[Auth] getRedirectUriByProvider(${provider}):`, redirectUri);
+  debugLog(`[Auth] Redirect URI type:`, typeof redirectUri);
+  debugLog(`[Auth] Redirect URI is undefined:`, redirectUri === undefined);
+  debugLog(`[Auth] Redirect URI is null:`, redirectUri === null);
 
   if (!redirectUri) {
     console.error(`[Auth] ERROR: ${provider} redirect URI is ${redirectUri}`);
@@ -590,6 +614,79 @@ export async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+// 회원 탈퇴
+// TODO: 백엔드 API 구현 대기 중
+// 스펙: DELETE /users/me 또는 DELETE /auth/withdraw
+// 서버에서 계정 데이터를 삭제하거나 비활성화 처리
+export async function deleteAccount(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  // TODO: 백엔드 API가 구현되면 아래 주석을 해제하고 구현하세요
+  /*
+  const url = `${API_URL}/users/me`; // 또는 /auth/withdraw
+  console.log("[API] DELETE", url, "- 회원 탈퇴 요청");
+
+  const token = getAccessToken();
+  const headers: HeadersInit = {
+    Accept: "application/json",
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  try {
+    let response = await fetch(url, {
+      method: "DELETE",
+      headers,
+      credentials: "include",
+    });
+
+    // 401 에러 발생 시 Refresh Token으로 재발급 시도
+    if (response.status === 401 && token) {
+      console.log("[API] Access token expired, attempting refresh...");
+      const newToken = await refreshAccessToken();
+
+      if (newToken) {
+        headers.Authorization = `Bearer ${newToken}`;
+        response = await fetch(url, {
+          method: "DELETE",
+          headers,
+          credentials: "include",
+        });
+      }
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        error: errorData.message || "회원 탈퇴에 실패했습니다.",
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("[API] Delete account error:", error);
+    return {
+      success: false,
+      error: "서버와 연결할 수 없습니다.",
+    };
+  }
+  */
+
+  // 임시: API가 구현되지 않았음을 알림
+  if (process.env.NODE_ENV === "development") {
+    console.warn(
+      "[API] 회원 탈퇴 API가 아직 구현되지 않았습니다. 백엔드 API 구현 후 deleteAccount 함수를 완성해주세요."
+    );
+  }
+  return {
+    success: false,
+    error: "회원 탈퇴 기능이 아직 준비되지 않았습니다.",
+  };
+}
+
 // 로그아웃
 // 스펙: Refresh Token이 없어도 항상 성공 응답(idempotent)
 // 서버는 항상 200 응답을 반환하며, Set-Cookie로 refresh_token을 만료시킴
@@ -766,7 +863,8 @@ export async function getProvinces(): Promise<Province[]> {
 
 // 시/군/구 목록 조회: GET /regions/{provinceId}/districts
 export async function getDistricts(
-  provinceId: string | number
+  provinceId: string | number,
+  signal?: AbortSignal
 ): Promise<District[]> {
   const url = `${API_URL}/regions/${provinceId}/districts`;
   console.log("[API] GET", url);
@@ -778,6 +876,7 @@ export async function getDistricts(
         Accept: "application/json",
       },
       credentials: "include",
+      signal,
     });
 
     console.log("[API] Response status:", response.status, response.statusText);
@@ -798,6 +897,10 @@ export async function getDistricts(
     console.log("[API] Districts:", apiResponse.data);
     return apiResponse.data;
   } catch (error) {
+    // AbortError는 정상적인 취소이므로 재throw하여 호출자가 처리할 수 있도록 함
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
     console.error("[API] Get districts error:", error);
     return [];
   }

@@ -8,10 +8,13 @@ import { useAuth } from "@/hooks/useAuth";
 import { getKakaoOAuthURL } from "@/lib/auth";
 import {
   createFreeGame,
+  determineGameType,
   type Gender,
   type Grade,
   type AgeGroup,
   type GradeType,
+  type GameType,
+  type Participant as GameParticipant,
 } from "@/lib/game";
 
 type ViewMode = "main" | "game-create" | "game-matchup" | "game-complete";
@@ -40,14 +43,6 @@ type CourtMatch = {
   player4Id: string;
 };
 
-type GameType =
-  | "MEN_DOUBLES"
-  | "WOMEN_DOUBLES"
-  | "MIXED_DOUBLES"
-  | "CROSS_DOUBLES"
-  | "OTHER_DOUBLES"
-  | "INCOMPLETE";
-
 const GRADES: { value: Grade; label: string }[] = [
   { value: "ROOKIE", label: "초심" },
   { value: "D", label: "D" },
@@ -66,65 +61,6 @@ const AGE_GROUPS: { value: AgeGroupUI; label: string }[] = [
   { value: "60", label: "60대" },
   { value: "70", label: "70대+" },
 ];
-
-// 게임 타입 판정 함수
-function determineGameType(
-  participants: Participant[],
-  player1Id: string,
-  player2Id: string,
-  player3Id: string,
-  player4Id: string
-): { type: GameType; label: string } {
-  const getGender = (id: string) =>
-    participants.find((p) => p.id === id)?.gender;
-
-  const p1Gender = getGender(player1Id);
-  const p2Gender = getGender(player2Id);
-  const p3Gender = getGender(player3Id);
-  const p4Gender = getGender(player4Id);
-
-  // 4명 모두 선택되지 않은 경우
-  if (!p1Gender || !p2Gender || !p3Gender || !p4Gender) {
-    return { type: "INCOMPLETE", label: "-" };
-  }
-
-  const team1Males = [p1Gender, p2Gender].filter((g) => g === "MALE").length;
-  const team1Females = [p1Gender, p2Gender].filter(
-    (g) => g === "FEMALE"
-  ).length;
-  const team2Males = [p3Gender, p4Gender].filter((g) => g === "MALE").length;
-  const team2Females = [p3Gender, p4Gender].filter(
-    (g) => g === "FEMALE"
-  ).length;
-
-  // 2M vs 2M → 남자복식
-  if (team1Males === 2 && team2Males === 2) {
-    return { type: "MEN_DOUBLES", label: "남자복식" };
-  }
-  // 2F vs 2F → 여자복식
-  if (team1Females === 2 && team2Females === 2) {
-    return { type: "WOMEN_DOUBLES", label: "여자복식" };
-  }
-  // 1M1F vs 1M1F → 혼합복식
-  if (
-    team1Males === 1 &&
-    team1Females === 1 &&
-    team2Males === 1 &&
-    team2Females === 1
-  ) {
-    return { type: "MIXED_DOUBLES", label: "혼합복식" };
-  }
-  // 2M vs 2F || 2F vs 2M → 혼성복식
-  if (
-    (team1Males === 2 && team2Females === 2) ||
-    (team1Females === 2 && team2Males === 2)
-  ) {
-    return { type: "CROSS_DOUBLES", label: "혼성복식" };
-  }
-
-  // 위 조건에 해당하지 않는 모든 경우 (예: 2M vs 1M1F) → 기타복식
-  return { type: "OTHER_DOUBLES", label: "기타복식" };
-}
 
 export default function CourtManager() {
   const { isLoggedIn } = useAuth();
@@ -993,8 +929,10 @@ export default function CourtManager() {
 
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                     {roundMatches.map((match) => {
+                      // determineGameType은 gender 필드만 사용하므로 타입 호환성을 위해 단언 사용
+                      // (로컬 Participant의 ageGroup은 문자열이지만, determineGameType은 gender만 사용)
                       const gameType = determineGameType(
-                        participants,
+                        participants as unknown as GameParticipant[],
                         match.player1Id,
                         match.player2Id,
                         match.player3Id,

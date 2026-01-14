@@ -343,15 +343,71 @@ export default function MainHeader() {
               )}
             </button>
 
-            <Link
-              href="/login"
-              className="flex items-center justify-center gap-2 rounded-full py-2 text-foreground-muted transition-colors hover:text-foreground focus:outline-none"
-              aria-label="로그인"
-              onClick={() => setIsMenuOpen(false)}
-            >
-              <Icon name="user-circle" className="h-6 w-6" />
-              <span className="font-medium">로그인</span>
-            </Link>
+            {isLoggedIn ? (
+              <>
+                {/* 로그인 상태: 마이페이지, 로그아웃 */}
+                <Link
+                  href="/mypage"
+                  className="flex items-center gap-2 py-2 text-sm font-medium text-foreground-muted transition-colors hover:text-foreground"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                    />
+                  </svg>
+                  <span>마이페이지</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    handleLogout();
+                  }}
+                  className="flex items-center gap-2 py-2 text-sm font-medium text-foreground-muted transition-colors hover:text-foreground"
+                >
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                    />
+                  </svg>
+                  <span>로그아웃</span>
+                </button>
+              </>
+            ) : (
+              <>
+                {/* 비로그인 상태: 카카오 로그인 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    const currentPath = window.location.pathname;
+                    window.location.href = getKakaoOAuthURL(currentPath);
+                  }}
+                  className="flex items-center justify-center gap-2 rounded-full py-2 text-foreground-muted transition-colors hover:text-foreground focus:outline-none"
+                  aria-label="로그인"
+                >
+                  <Icon name="user-circle" className="h-6 w-6" />
+                  <span className="font-medium">로그인</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

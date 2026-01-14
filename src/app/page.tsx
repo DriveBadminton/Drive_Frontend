@@ -56,7 +56,7 @@ export default function Home() {
 
         {/* 검색창 */}
         <div className="flex w-full justify-center pb-12">
-          <div className="relative w-full max-w-2xl">
+          <div className="group relative w-full max-w-2xl">
             <div className="absolute inset-0 -z-10 rounded-full bg-white/40 blur-xl"></div>
             <input
               type="text"

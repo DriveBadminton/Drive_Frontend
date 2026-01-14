@@ -39,15 +39,19 @@ function GoogleCallbackContent() {
 
       // 1) OAuth 로그인: /auth/login 호출
       const redirectUri = getOAuthRedirectUri("GOOGLE");
-      console.log(
-        "[Callback] Google redirect URI before API call:",
-        redirectUri
-      );
-      console.log("[Callback] Full request payload:", {
-        provider: "GOOGLE",
-        authorizationCode: code,
-        redirectUri: redirectUri,
-      });
+
+      // 개발 환경에서만 로깅 (민감한 authorizationCode는 마스킹)
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[Callback] Google redirect URI before API call:",
+          redirectUri
+        );
+        console.log("[Callback] Full request payload:", {
+          provider: "GOOGLE",
+          authorizationCode: code ? `${code.substring(0, 8)}...` : "none",
+          redirectUri: redirectUri,
+        });
+      }
 
       const result = await loginWithOAuth({
         provider: "GOOGLE",

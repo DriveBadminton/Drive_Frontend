@@ -103,7 +103,7 @@ export default function MainFooter() {
 
         <div className="mt-12 border-t border-border pt-8">
           <p className="text-center text-sm text-foreground-muted/50">
-            &copy; 2025 Drive. All rights reserved.
+            &copy; {new Date().getFullYear()} Drive. All rights reserved.
           </p>
         </div>
       </div>

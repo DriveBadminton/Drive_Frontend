@@ -120,16 +120,37 @@ export default function AccountProfilePage() {
       return;
     }
 
+    const abortController = new AbortController();
+
     const loadDistricts = async () => {
       setIsLoadingDistricts(true);
-      const districtsList = await getDistricts(form.provinceId);
-      setDistricts(districtsList);
-      setIsLoadingDistricts(false);
-      // 시/도 변경 시 districtId 초기화
-      setForm((prev) => ({ ...prev, districtId: "" }));
+      try {
+        const districtsList = await getDistricts(
+          form.provinceId,
+          abortController.signal
+        );
+        // 요청이 취소되지 않았는지 확인
+        if (!abortController.signal.aborted) {
+          setDistricts(districtsList);
+          setIsLoadingDistricts(false);
+          // 시/도 변경 시 districtId 초기화
+          setForm((prev) => ({ ...prev, districtId: "" }));
+        }
+      } catch (error) {
+        // AbortError는 정상적인 취소이므로 무시
+        if (error instanceof Error && error.name !== "AbortError") {
+          console.error("[AccountProfile] Failed to load districts:", error);
+          setIsLoadingDistricts(false);
+        }
+      }
     };
 
     loadDistricts();
+
+    // cleanup: 이전 요청 취소
+    return () => {
+      abortController.abort();
+    };
   }, [form.provinceId]);
 
   const onSubmit = async () => {

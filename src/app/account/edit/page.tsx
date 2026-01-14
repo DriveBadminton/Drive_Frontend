@@ -7,6 +7,7 @@ import {
   submitUserProfile,
   getProvinces,
   getDistricts,
+  deleteAccount,
   Province,
   District,
 } from "@/lib/auth";
@@ -112,14 +113,35 @@ function AccountEditContent() {
       return;
     }
 
+    const abortController = new AbortController();
+
     const loadDistricts = async () => {
       setIsLoadingDistricts(true);
-      const districtsList = await getDistricts(form.provinceId);
-      setDistricts(districtsList);
-      setIsLoadingDistricts(false);
+      try {
+        const districtsList = await getDistricts(
+          form.provinceId,
+          abortController.signal
+        );
+        // 요청이 취소되지 않았는지 확인
+        if (!abortController.signal.aborted) {
+          setDistricts(districtsList);
+          setIsLoadingDistricts(false);
+        }
+      } catch (error) {
+        // AbortError는 정상적인 취소이므로 무시
+        if (error instanceof Error && error.name !== "AbortError") {
+          console.error("[AccountEdit] Failed to load districts:", error);
+          setIsLoadingDistricts(false);
+        }
+      }
     };
 
     loadDistricts();
+
+    // cleanup: 이전 요청 취소
+    return () => {
+      abortController.abort();
+    };
   }, [form.provinceId]);
 
   const onSubmit = async () => {
@@ -164,9 +186,37 @@ function AccountEditContent() {
   const handleWithdraw = async () => {
     if (!canWithdraw) return;
 
-    await logout();
-    setIsWithdrawOpen(false);
-    router.push("/");
+    try {
+      // TODO: 백엔드 API 구현 후 주석 해제
+      // 실제 계정 삭제 API 호출
+      const result = await deleteAccount();
+
+      if (!result.success) {
+        // API가 아직 구현되지 않은 경우 사용자에게 알림
+        if (result.error?.includes("아직 준비되지 않았습니다")) {
+          alert(
+            "회원 탈퇴 기능이 아직 준비되지 않았습니다.\n현재는 로그아웃만 처리됩니다."
+          );
+          // 임시로 로그아웃만 수행
+          await logout();
+          setIsWithdrawOpen(false);
+          router.push("/");
+          return;
+        }
+
+        // 실제 API 에러인 경우
+        setErrorMessage(result.error || "회원 탈퇴에 실패했습니다.");
+        return;
+      }
+
+      // 계정 삭제 성공 시 로그아웃 및 리다이렉트
+      await logout();
+      setIsWithdrawOpen(false);
+      router.push("/");
+    } catch (error) {
+      console.error("[AccountEdit] 회원 탈퇴 중 오류:", error);
+      setErrorMessage("회원 탈퇴 중 오류가 발생했습니다.");
+    }
   };
 
   return (
