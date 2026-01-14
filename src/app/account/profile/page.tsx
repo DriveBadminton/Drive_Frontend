@@ -26,7 +26,7 @@ type FormState = {
 
 export default function AccountProfilePage() {
   const router = useRouter();
-  const { isLoggedIn, isLoading, refetch } = useAuth();
+  const { isLoggedIn, isLoading, refetch, logout } = useAuth();
 
   const [form, setForm] = useState<FormState>({
     nickname: "",
@@ -92,7 +92,8 @@ export default function AccountProfilePage() {
       // 1. Prefill 데이터 가져오기
       const loadPrefill = async () => {
         const prefill = await getProfilePrefill();
-        if (prefill?.suggestedNickname) {
+        // hasOauthNickname이 true이고 suggestedNickname이 있으면 사용
+        if (prefill?.hasOauthNickname && prefill?.suggestedNickname) {
           setForm((prev) => ({
             ...prev,
             nickname: prefill.suggestedNickname!,
@@ -166,7 +167,7 @@ export default function AccountProfilePage() {
   };
 
   return (
-    <PageShell>
+    <PageShell disableHeader={true} disableFooter={true}>
       <div className="mx-auto w-full max-w-2xl px-4 py-14 sm:px-6 lg:px-8">
         <div className="rounded-2xl bg-background-secondary p-6 ring-1 ring-border sm:p-8">
           <h1 className="text-2xl font-semibold text-foreground">
@@ -344,7 +345,7 @@ export default function AccountProfilePage() {
               </div>
             )}
 
-            <div className="pt-2">
+            <div className="pt-2 space-y-3">
               <button
                 type="button"
                 onClick={onSubmit}
@@ -352,6 +353,16 @@ export default function AccountProfilePage() {
                 className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-primary/30 transition-all hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
               >
                 {isSubmitting ? "저장 중..." : "회원가입 완료"}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await logout();
+                  router.push("/");
+                }}
+                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-semibold text-foreground transition-all hover:bg-background-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                돌아가기
               </button>
             </div>
           </div>

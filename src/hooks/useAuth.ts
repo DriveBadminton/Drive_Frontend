@@ -21,7 +21,7 @@ export function useAuth() {
 
     // 액세스 토큰이 없으면 API 호출하지 않음 (비로그인 상태)
     const token = getAccessToken();
-    if (!token) {
+    if (!token || !token.trim()) {
       console.log("[useAuth] No access token, skipping user fetch");
       setUser(null);
       setAccountStatus(null);
@@ -29,8 +29,26 @@ export function useAuth() {
       return;
     }
 
+    console.log("[useAuth] Access token found:", {
+      hasToken: !!token,
+      tokenLength: token.length,
+      tokenPreview: token.substring(0, 20) + "...",
+    });
+
     try {
+      console.log("[useAuth] fetchUser 호출 - /users/me 요청 시작");
       const userData = await getCurrentUser();
+      console.log("[useAuth] fetchUser 완료 - 사용자 데이터:", userData);
+
+      // 사용자 데이터가 null이고 토큰이 있었다면, 토큰이 유효하지 않을 수 있음
+      if (!userData && token) {
+        console.warn(
+          "[useAuth] 토큰이 있지만 사용자 데이터를 가져오지 못함 - 토큰이 만료되었거나 유효하지 않을 수 있음"
+        );
+        // 토큰 제거는 하지 않음 (네트워크 문제일 수도 있으므로)
+        // 하지만 사용자 상태는 null로 설정
+      }
+
       setUser(userData);
       if (userData && userData.status) {
         setAccountStatus({
@@ -42,6 +60,7 @@ export function useAuth() {
         setAccountStatus(null);
       }
     } catch (error) {
+      console.error("[useAuth] fetchUser error:", error);
       setUser(null);
       setAccountStatus(null);
     } finally {

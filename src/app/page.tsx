@@ -51,12 +51,12 @@ export default function Home() {
         <img
           src="/drive-logo.svg"
           alt="Drive Logo"
-          className="mb-8 h-24 w-auto drop-shadow-sm sm:h-32 lg:h-44 brightness-0 invert"
+          className="mb-8 h-24 w-auto drop-shadow-sm sm:h-32 lg:h-44 dark:brightness-0 dark:invert"
         />
 
         {/* 검색창 */}
         <div className="flex w-full justify-center pb-12">
-          <div className="relative w-full max-w-2xl transform transition-all hover:scale-105">
+          <div className="relative w-full max-w-2xl">
             <div className="absolute inset-0 -z-10 rounded-full bg-white/40 blur-xl"></div>
             <input
               type="text"

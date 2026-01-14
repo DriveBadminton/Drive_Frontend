@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   getCurrentUser,
@@ -8,7 +8,7 @@ import {
   loginWithOAuth,
 } from "@/lib/auth";
 
-export default function GoogleCallbackPage() {
+function GoogleCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<"loading" | "success" | "error">(
@@ -63,7 +63,12 @@ export default function GoogleCallbackPage() {
         }
 
         // 2) 로그인 성공 후 상태 확인: /users/me (액세스 토큰 포함)
+        console.log("[GoogleCallback] 로그인 성공 후 /users/me 호출 시작");
         const userData = await getCurrentUser(result.accessToken);
+        console.log(
+          "[GoogleCallback] /users/me 호출 완료 - 사용자 데이터:",
+          userData
+        );
 
         if (!userData) {
           setStatus("error");
@@ -78,11 +83,20 @@ export default function GoogleCallbackPage() {
           return;
         }
 
-        // ACTIVE 상태인 경우 랜딩페이지로 이동
-        setStatus("success");
-        setTimeout(() => {
-          router.push("/");
-        }, 800);
+        // ACTIVE 상태인 경우 저장된 returnTo 경로로 이동, 없으면 랜딩페이지로
+        const returnTo = sessionStorage.getItem("oauth_return_to");
+        if (returnTo) {
+          sessionStorage.removeItem("oauth_return_to");
+          setStatus("success");
+          setTimeout(() => {
+            router.push(returnTo);
+          }, 800);
+        } else {
+          setStatus("success");
+          setTimeout(() => {
+            router.push("/");
+          }, 800);
+        }
       } else {
         setStatus("error");
         setErrorMessage(result.error || "로그인에 실패했습니다.");
@@ -131,9 +145,6 @@ export default function GoogleCallbackPage() {
             <h1 className="text-xl font-semibold text-foreground">
               로그인 성공!
             </h1>
-            <p className="mt-2 text-foreground-muted">
-              랜딩페이지로 이동합니다...
-            </p>
           </>
         )}
 
@@ -170,5 +181,28 @@ export default function GoogleCallbackPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Suspense로 감싸는 메인 페이지 컴포넌트
+export default function GoogleCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-center">
+            <div className="mb-4">
+              <div className="h-12 w-12 mx-auto rounded-full border-4 border-primary border-t-transparent animate-spin" />
+            </div>
+            <h1 className="text-xl font-semibold text-foreground">
+              로그인 처리 중...
+            </h1>
+            <p className="mt-2 text-foreground-muted">잠시만 기다려주세요.</p>
+          </div>
+        </div>
+      }
+    >
+      <GoogleCallbackContent />
+    </Suspense>
   );
 }

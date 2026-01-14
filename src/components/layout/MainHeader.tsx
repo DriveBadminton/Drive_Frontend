@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { getKakaoOAuthURL } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "@/contexts/ThemeContext";
+import Icon from "@/components/Icon";
 
 interface NavItem {
   label: string;
@@ -23,6 +25,7 @@ export default function MainHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, isLoggedIn, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
   const handleLogout = async () => {
     const success = await logout();
@@ -33,7 +36,7 @@ export default function MainHeader() {
 
   return (
     <header className="flex-none sticky top-0 z-50 border-border bg-background-secondary">
-      <div className="mx-auto flex h-20 w-full max-w-7xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex h-20 w-full max-w-7xl items-center gap-6 px-4 sm:px-6 lg:px-8">
         <Link
           href="/"
           className="flex items-center gap-2"
@@ -47,12 +50,12 @@ export default function MainHeader() {
           <img
             src="/drive-wordmark.svg"
             alt="Drive Wordmark"
-            className="hidden h-8 w-auto sm:block brightness-0 invert"
+            className="hidden h-8 w-auto sm:block dark:brightness-0 dark:invert"
           />
         </Link>
 
         <nav
-          className="hidden flex-1 items-center justify-center gap-8 text-sm font-medium text-foreground-muted lg:flex"
+          className="hidden items-center gap-4 text-sm font-medium text-foreground-muted lg:flex"
           role="navigation"
           aria-label="메인 네비게이션"
         >
@@ -103,8 +106,25 @@ export default function MainHeader() {
           })}
         </nav>
 
-        {/* 로그인 드롭다운 */}
-        <div className="hidden justify-end lg:flex">
+        {/* 테마 토글 + 로그인 드롭다운 */}
+        <div className="hidden items-center gap-2 lg:flex ml-auto">
+          {/* 테마 토글 버튼 */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex items-center justify-center rounded-lg p-2 text-foreground-muted transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            aria-label={
+              theme === "light" ? "다크 모드로 전환" : "라이트 모드로 전환"
+            }
+          >
+            {theme === "light" ? (
+              <Icon name="moon" className="h-5 w-5" />
+            ) : (
+              <Icon name="sun" className="h-5 w-5" />
+            )}
+          </button>
+
+          {/* 로그인 드롭다운 */}
           <div
             className="relative"
             onMouseEnter={() => setIsLoginHovered(true)}
@@ -119,7 +139,7 @@ export default function MainHeader() {
           >
             <button
               tabIndex={0}
-              className={`flex items-center justify-center rounded-lg p-2 text-foreground-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+              className={`flex items-center justify-center rounded-lg p-2 text-foreground-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                 isLoginHovered
                   ? "rounded-b-none bg-background"
                   : "hover:bg-background"
@@ -128,11 +148,7 @@ export default function MainHeader() {
               aria-expanded={isLoginHovered}
               aria-haspopup="true"
             >
-              <img
-                src="/user-icon.svg"
-                alt="사용자"
-                className="h-6 w-6 brightness-0 invert opacity-70"
-              />
+              <Icon name="user-circle" className="h-6 w-6" />
             </button>
 
             {/* 드롭다운 메뉴 */}
@@ -201,7 +217,9 @@ export default function MainHeader() {
                       role="menuitem"
                       tabIndex={0}
                       onClick={() => {
-                        window.location.href = getKakaoOAuthURL();
+                        // 현재 경로를 returnTo로 전달
+                        const currentPath = window.location.pathname;
+                        window.location.href = getKakaoOAuthURL(currentPath);
                       }}
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground-muted/10 focus-visible:bg-foreground-muted/10 focus-visible:outline-none"
                     >
@@ -306,17 +324,32 @@ export default function MainHeader() {
                 </Link>
               );
             })}
+            {/* 테마 토글 버튼 (모바일) */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="flex items-center gap-2 py-2 text-sm font-medium text-foreground-muted transition-colors hover:text-foreground"
+            >
+              {theme === "light" ? (
+                <>
+                  <Icon name="moon" className="h-5 w-5" />
+                  <span>다크 모드로 전환</span>
+                </>
+              ) : (
+                <>
+                  <Icon name="sun" className="h-5 w-5" />
+                  <span>라이트 모드로 전환</span>
+                </>
+              )}
+            </button>
+
             <Link
               href="/login"
               className="flex items-center justify-center gap-2 rounded-full py-2 text-foreground-muted transition-colors hover:text-foreground focus:outline-none"
               aria-label="로그인"
               onClick={() => setIsMenuOpen(false)}
             >
-              <img
-                src="/user-icon.svg"
-                alt="사용자"
-                className="h-6 w-6 brightness-0 invert opacity-70"
-              />
+              <Icon name="user-circle" className="h-6 w-6" />
               <span className="font-medium">로그인</span>
             </Link>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import PageShell from "@/components/layout/PageShell";
 import {
@@ -23,7 +23,8 @@ type FormState = {
   gender: string;
 };
 
-export default function AccountEditPage() {
+// useSearchParams를 사용하는 내부 컴포넌트
+function AccountEditContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isLoggedIn, isLoading, logout, refetch } = useAuth();
@@ -453,5 +454,25 @@ export default function AccountEditPage() {
         </div>
       )}
     </PageShell>
+  );
+}
+
+// Suspense로 감싸는 메인 페이지 컴포넌트
+export default function AccountEditPage() {
+  return (
+    <Suspense
+      fallback={
+        <PageShell>
+          <div className="flex min-h-[50vh] items-center justify-center">
+            <div className="text-center">
+              <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+              <p className="mt-4 text-foreground-muted">로딩 중...</p>
+            </div>
+          </div>
+        </PageShell>
+      }
+    >
+      <AccountEditContent />
+    </Suspense>
   );
 }

@@ -1,15 +1,38 @@
 @import "tailwindcss";
 
+/* 라이트 모드 (기본) */
 :root {
+  /* 배경 색상 */
+  --background: #f8f9fa;
+  --background-secondary: #ffffff;
+  --background-card: #ffffff;
+
+  /* 블루 색상 (Drive 로고 컬러) */
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-dark: #1e40af;
+  --primary-accent: #06b6d4; /* 시안 액센트 */
+
+  /* 텍스트 색상 */
+  --foreground: #1a1a2e;
+  --foreground-muted: #6b7280;
+
+  /* 보더 색상 */
+  --border: #e5e7eb;
+}
+
+/* 다크 모드 */
+.dark {
   /* 배경 색상 - Gray */
   --background: #0d0d0e;
   --background-secondary: #19191c;
   --background-card: #19191c;
 
-  /* 퍼플 색상 */
-  --primary: #721ae7;
-  --primary-hover: #6816d6;
-  --primary-dark: #6816d6;
+  /* 블루 색상 (Drive 로고 컬러) */
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-accent: #06b6d4; /* 시안 액센트 */
 
   /* 텍스트 색상 */
   --foreground: #ffffff;
@@ -41,11 +64,13 @@ body {
 
 /* Number input 스핀 버튼 스타일링 */
 input[type="number"] {
+  appearance: textfield;
   -moz-appearance: textfield; /* Firefox에서 기본 스핀 버튼 제거 */
 }
 
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
+  appearance: none;
   -webkit-appearance: none;
   margin: 0;
   opacity: 0.7;
@@ -55,6 +80,7 @@ input[type="number"]::-webkit-outer-spin-button {
 /* 커스텀 스핀 버튼이 있는 number input */
 .number-input-custom::-webkit-inner-spin-button,
 .number-input-custom::-webkit-outer-spin-button {
+  appearance: inner-spin-button;
   -webkit-appearance: inner-spin-button;
   opacity: 0.7;
   width: 20px;
@@ -72,21 +98,21 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(114, 26, 231, 0.5); /* primary color with opacity */
+  background: rgba(37, 99, 235, 0.5); /* primary blue color with opacity */
   border-radius: 4px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(
-    114,
-    26,
-    231,
+    37,
+    99,
+    235,
     0.7
-  ); /* primary color with higher opacity on hover */
+  ); /* primary blue color with higher opacity on hover */
 }
 
 /* Firefox */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(114, 26, 231, 0.5) rgba(255, 255, 255, 0.05);
+  scrollbar-color: rgba(37, 99, 235, 0.5) rgba(255, 255, 255, 0.05);
 }

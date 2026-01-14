@@ -15,12 +15,14 @@ export interface User {
   id: number;
   role: string;
   status: UserStatus;
+  nickname?: string; // API 응답에 포함되는 닉네임
   grade?: string | null;
   provinceName?: string | null;
   districtName?: string | null;
+  gender?: "MALE" | "FEMALE" | null;
   // 기존 호환성을 위한 필드들
   email?: string;
-  name?: string;
+  name?: string; // 소셜 로그인에서 가져온 이름 (하위 호환성)
   profileImage?: string;
 }
 
@@ -56,8 +58,13 @@ export interface UserProfileRequest {
 }
 
 // Google OAuth URL 생성
-export function getGoogleOAuthURL(): string {
+export function getGoogleOAuthURL(returnTo?: string): string {
   const rootUrl = "https://accounts.google.com/o/oauth2/v2/auth";
+
+  // returnTo가 제공되면 sessionStorage에 저장
+  if (returnTo && typeof window !== "undefined") {
+    sessionStorage.setItem("oauth_return_to", returnTo);
+  }
 
   const options = {
     client_id: GOOGLE_CLIENT_ID,
@@ -76,14 +83,28 @@ export function getGoogleOAuthURL(): string {
 }
 
 // Kakao OAuth URL 생성
-export function getKakaoOAuthURL(): string {
+// forceLogin: true면 매번 카카오 로그인 화면 표시 (다른 계정으로 로그인)
+export function getKakaoOAuthURL(
+  returnTo?: string,
+  forceLogin: boolean = false
+): string {
   const rootUrl = "https://kauth.kakao.com/oauth/authorize";
 
-  const options = {
+  // returnTo가 제공되면 sessionStorage에 저장
+  if (returnTo && typeof window !== "undefined") {
+    sessionStorage.setItem("oauth_return_to", returnTo);
+  }
+
+  const options: Record<string, string> = {
     client_id: KAKAO_CLIENT_ID,
     redirect_uri: KAKAO_REDIRECT_URI,
     response_type: "code",
   };
+
+  // forceLogin이 true면 prompt=login 추가 (다른 계정으로 로그인)
+  if (forceLogin) {
+    options.prompt = "login";
+  }
 
   const qs = new URLSearchParams(options);
   return `${rootUrl}?${qs.toString()}`;
@@ -136,7 +157,9 @@ const ACCESS_TOKEN_KEY = "access_token";
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
-  return sessionStorage.getItem(ACCESS_TOKEN_KEY);
+  const token = sessionStorage.getItem(ACCESS_TOKEN_KEY);
+  // 빈 문자열이나 공백만 있는 경우도 null로 처리
+  return token && token.trim() ? token : null;
 }
 
 export function setAccessToken(token: string): void {
@@ -169,8 +192,19 @@ export async function loginWithOAuth(
   const requestBody = JSON.stringify(input);
 
   console.log("[API] POST", url);
+  console.log("[API] API_URL:", API_URL);
+  console.log("[API] Full URL:", url);
   console.log("[API] Request body (JSON string):", requestBody);
   console.log("[API] Request payload (object):", input);
+
+  // API URL 유효성 검사
+  if (!API_URL || API_URL === "undefined") {
+    console.error("[API] API_URL이 설정되지 않았습니다!");
+    return {
+      success: false,
+      error: "API 서버 URL이 설정되지 않았습니다.",
+    };
+  }
 
   // JSON 파싱 테스트로 실제 전송될 데이터 확인
   try {
@@ -183,6 +217,17 @@ export async function loginWithOAuth(
   }
 
   try {
+    // 타임아웃 설정 (30초)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    console.log("[API] Fetch 요청 시작:", {
+      url,
+      method: "POST",
+      hasBody: !!requestBody,
+      timestamp: new Date().toISOString(),
+    });
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -191,7 +236,10 @@ export async function loginWithOAuth(
       },
       body: requestBody,
       credentials: "include", // 쿠키를 받기 위해 필수
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     console.log("[API] Response status:", response.status, response.statusText);
     console.log(
@@ -229,9 +277,40 @@ export async function loginWithOAuth(
     return { success: true };
   } catch (error) {
     console.error("[API] Auth error:", error);
+
+    // 타임아웃 에러인지 확인
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || error.message.includes("aborted")) {
+        console.error("[API] 요청 타임아웃 (30초 초과)", {
+          url,
+          apiUrl: API_URL,
+          errorName: error.name,
+          errorMessage: error.message,
+        });
+        return {
+          success: false,
+          error:
+            "서버 응답 시간이 초과되었습니다. 백엔드 서버가 실행 중인지 확인해주세요.",
+        };
+      }
+
+      if (error.message.includes("Failed to fetch")) {
+        console.error("[API] 네트워크 연결 실패:", {
+          url,
+          apiUrl: API_URL,
+          errorMessage: error.message,
+        });
+        return {
+          success: false,
+          error: `서버에 연결할 수 없습니다. (${API_URL})`,
+        };
+      }
+    }
+
     return {
       success: false,
-      error: "서버와 연결할 수 없습니다.",
+      error:
+        error instanceof Error ? error.message : "서버와 연결할 수 없습니다.",
     };
   }
 }
@@ -267,7 +346,7 @@ export async function submitUserProfile(
   }
 
   try {
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
@@ -275,6 +354,35 @@ export async function submitUserProfile(
     });
 
     console.log("[API] Response status:", response.status, response.statusText);
+
+    // 401 에러 발생 시 Refresh Token으로 재발급 시도
+    if (response.status === 401 && token) {
+      console.log("[API] Access token expired, attempting refresh...");
+      const newToken = await refreshAccessToken();
+
+      if (newToken) {
+        // 새 토큰으로 재시도
+        console.log("[API] Retrying request with new access token");
+        headers.Authorization = `Bearer ${newToken}`;
+        response = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+          credentials: "include",
+        });
+        console.log(
+          "[API] Retry response status:",
+          response.status,
+          response.statusText
+        );
+      } else {
+        // Refresh 실패
+        return {
+          success: false,
+          error: "세션이 만료되었습니다. 다시 로그인해주세요.",
+        };
+      }
+    }
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -293,21 +401,34 @@ export async function submitUserProfile(
   }
 }
 
+// /users/me 호출 횟수 추적 (디버깅용)
+let usersMeCallCount = 0;
+
 // 현재 로그인한 사용자 정보 가져오기
 export async function getCurrentUser(
   accessToken?: string
 ): Promise<User | null> {
   // 액세스 토큰이 제공되지 않으면 저장된 토큰 사용
-  const token = accessToken || getAccessToken();
+  let token = accessToken || getAccessToken();
 
-  // 토큰이 없으면 API 호출하지 않음 (비로그인 상태)
-  if (!token) {
+  // 토큰이 없거나 빈 문자열이면 API 호출하지 않음 (비로그인 상태)
+  if (!token || !token.trim()) {
     console.log("[API] No access token found, skipping /users/me request");
     return null;
   }
 
+  // 호출 횟수 증가 및 로그
+  usersMeCallCount++;
+  const callNumber = usersMeCallCount;
+  const caller = new Error().stack?.split("\n")[2]?.trim() || "unknown";
+
   const url = `${API_URL}/users/me`;
-  console.log("[API] GET", url);
+  console.log(`[API] GET ${url} - 호출 #${callNumber}`, {
+    callNumber,
+    caller,
+    hasToken: !!token,
+    timestamp: new Date().toISOString(),
+  });
 
   const headers: HeadersInit = {
     Accept: "application/json",
@@ -315,7 +436,7 @@ export async function getCurrentUser(
   };
 
   try {
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: "GET",
       headers,
       credentials: "include", // 쿠키 전송 (RefreshToken 쿠키)
@@ -323,20 +444,42 @@ export async function getCurrentUser(
 
     console.log("[API] Response status:", response.status, response.statusText);
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        // 401은 로그인하지 않은 상태이므로 정상적인 응답입니다
-        const errorData = await response.json().catch(() => ({}));
-        console.debug("[API] Unauthorized - 로그인되지 않은 상태:", errorData);
+    // 401 에러 발생 시 Refresh Token으로 재발급 시도
+    if (response.status === 401) {
+      console.log("[API] Access token expired, attempting refresh...");
+      const newToken = await refreshAccessToken();
+
+      if (newToken) {
+        // 새 토큰으로 재시도
+        console.log("[API] Retrying request with new access token");
+        headers.Authorization = `Bearer ${newToken}`;
+        response = await fetch(url, {
+          method: "GET",
+          headers,
+          credentials: "include",
+        });
+        console.log(
+          "[API] Retry response status:",
+          response.status,
+          response.statusText
+        );
       } else {
-        console.warn("[API] Failed to get user:", response.status);
-        const errorData = await response.json().catch(() => ({}));
-        console.warn("[API] Error details:", errorData);
+        // Refresh 실패 - 로그인되지 않은 상태
+        console.debug("[API] Refresh failed - user not logged in");
+        return null;
       }
+    }
+
+    if (!response.ok) {
+      console.warn("[API] Failed to get user:", response.status);
+      const errorData = await response.json().catch(() => ({}));
+      console.warn("[API] Error details:", errorData);
       return null;
     }
 
-    const apiResponse = (await response.json()) as ApiResponse<User>;
+    const apiResponse = (await response.json()) as ApiResponse<
+      User & { nickname?: string }
+    >;
     console.log("[API] User API response:", apiResponse);
 
     if (!apiResponse.success || !apiResponse.data) {
@@ -344,13 +487,19 @@ export async function getCurrentUser(
       return null;
     }
 
+    const responseData = apiResponse.data;
     const user: User = {
-      id: apiResponse.data.id,
-      role: apiResponse.data.role,
-      status: apiResponse.data.status,
-      grade: apiResponse.data.grade ?? null,
-      provinceName: apiResponse.data.provinceName ?? null,
-      districtName: apiResponse.data.districtName ?? null,
+      id: responseData.id,
+      role: responseData.role,
+      status: responseData.status,
+      nickname: responseData.nickname ?? undefined, // API 응답의 nickname 필드
+      grade: responseData.grade ?? null,
+      provinceName: responseData.provinceName ?? null,
+      districtName: responseData.districtName ?? null,
+      gender: responseData.gender ?? null,
+      // 소셜 로그인에서 가져온 이름과 프로필 사진 (하위 호환성)
+      name: responseData.name ?? undefined,
+      profileImage: responseData.profileImage ?? undefined,
     };
 
     console.log("[API] User data:", user);
@@ -359,6 +508,84 @@ export async function getCurrentUser(
     console.error("[API] Get user error:", error);
     console.error("[API] API_URL:", API_URL);
     console.error("[API] Full URL:", url);
+
+    // 네트워크 타임아웃이나 연결 실패 시 처리
+    if (error instanceof Error) {
+      if (
+        error.message.includes("Failed to fetch") ||
+        error.name === "TypeError"
+      ) {
+        console.warn(
+          "[API] Network error (타임아웃 또는 연결 실패) - 토큰이 유효하지 않을 수 있으므로 제거"
+        );
+        // 타임아웃이 발생하면 토큰이 유효하지 않거나 서버에 연결할 수 없는 상태
+        // 비로그인 상태로 처리하기 위해 토큰 제거
+        removeAccessToken();
+      }
+    }
+
+    return null;
+  }
+}
+
+// Refresh Token으로 Access Token 재발급
+interface RefreshTokenResponse {
+  userId: number;
+  accessToken: string;
+}
+
+export async function refreshAccessToken(): Promise<string | null> {
+  const url = `${API_URL}/auth/refresh`;
+  console.log("[API] POST", url, "- Refresh Token으로 Access Token 재발급");
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+      },
+      credentials: "include", // Refresh Token Cookie 전송
+    });
+
+    console.log(
+      "[API] Refresh response status:",
+      response.status,
+      response.statusText
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error("[API] Refresh token failed:", errorData);
+
+      if (response.status === 400 || response.status === 500) {
+        // Refresh Token이 없거나 만료된 경우
+        console.warn(
+          "[API] Refresh token invalid or expired, removing access token"
+        );
+        removeAccessToken();
+      }
+      return null;
+    }
+
+    const apiResponse =
+      (await response.json()) as ApiResponse<RefreshTokenResponse>;
+    console.log("[API] Refresh success response:", apiResponse);
+
+    if (!apiResponse.success || !apiResponse.data?.accessToken) {
+      console.warn("[API] Refresh response indicates failure:", apiResponse);
+      return null;
+    }
+
+    const newAccessToken = apiResponse.data.accessToken;
+    setAccessToken(newAccessToken); // 새 Access Token 저장
+    console.log("[API] New access token saved");
+
+    // Refresh Token Cookie는 서버에서 Set-Cookie로 자동 업데이트됨
+
+    return newAccessToken;
+  } catch (error) {
+    console.error("[API] Refresh token error:", error);
+    removeAccessToken();
     return null;
   }
 }
@@ -367,8 +594,11 @@ export async function getCurrentUser(
 // 스펙: Refresh Token이 없어도 항상 성공 응답(idempotent)
 // 서버는 항상 200 응답을 반환하며, Set-Cookie로 refresh_token을 만료시킴
 export async function logout(): Promise<boolean> {
+  const url = `${API_URL}/auth/logout`;
+  console.log("[API] POST", url, "- 로그아웃 요청");
+
   try {
-    const response = await fetch(`${API_URL}/auth/logout`, {
+    const response = await fetch(url, {
       method: "POST",
       credentials: "include", // 쿠키 전송 (Refresh Token Cookie)
     });
@@ -398,8 +628,14 @@ export async function logout(): Promise<boolean> {
 }
 
 // 프로필 입력 전 Prefill 정보 가져오기: GET /users/me/profile/prefill
+export interface ProfilePrefillData {
+  suggestedNickname: string | null;
+  hasOauthNickname: boolean;
+}
+
 export interface ProfilePrefillResponse {
-  suggestedNickname?: string;
+  suggestedNickname?: string | null;
+  hasOauthNickname?: boolean;
 }
 
 export async function getProfilePrefill(): Promise<ProfilePrefillResponse | null> {
@@ -415,7 +651,7 @@ export async function getProfilePrefill(): Promise<ProfilePrefillResponse | null
   }
 
   try {
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: "GET",
       headers,
       credentials: "include",
@@ -423,12 +659,55 @@ export async function getProfilePrefill(): Promise<ProfilePrefillResponse | null
 
     console.log("[API] Response status:", response.status, response.statusText);
 
+    // 401 에러 발생 시 Refresh Token으로 재발급 시도
+    if (response.status === 401 && token) {
+      console.log("[API] Access token expired, attempting refresh...");
+      const newToken = await refreshAccessToken();
+
+      if (newToken) {
+        // 새 토큰으로 재시도
+        console.log("[API] Retrying request with new access token");
+        headers.Authorization = `Bearer ${newToken}`;
+        response = await fetch(url, {
+          method: "GET",
+          headers,
+          credentials: "include",
+        });
+        console.log(
+          "[API] Retry response status:",
+          response.status,
+          response.statusText
+        );
+      } else {
+        // Refresh 실패
+        console.warn("[API] Refresh failed, returning null");
+        return null;
+      }
+    }
+
     if (!response.ok) {
       console.warn("[API] Failed to get prefill:", response.status);
+      const errorData = await response.json().catch(() => ({}));
+      console.warn("[API] Error details:", errorData);
       return null;
     }
 
-    const data = (await response.json()) as ProfilePrefillResponse;
+    // API 명세에 따르면 ApiResponse 래퍼로 감싸져 있음
+    const apiResponse =
+      (await response.json()) as ApiResponse<ProfilePrefillData>;
+    console.log("[API] Prefill API response:", apiResponse);
+
+    if (!apiResponse.success || !apiResponse.data) {
+      console.warn("[API] API response indicates failure:", apiResponse);
+      return null;
+    }
+
+    // 명세에 맞게 데이터 변환
+    const data: ProfilePrefillResponse = {
+      suggestedNickname: apiResponse.data.suggestedNickname,
+      hasOauthNickname: apiResponse.data.hasOauthNickname,
+    };
+
     console.log("[API] Prefill data:", data);
     return data;
   } catch (error) {
