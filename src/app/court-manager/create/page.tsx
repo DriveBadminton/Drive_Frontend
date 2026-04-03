@@ -8,12 +8,20 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Handshake,
+  LayoutGrid,
   LoaderCircle,
   MapPin,
   Search,
+  Scale,
+  ShieldCheck,
+  Shuffle,
   X,
   Trash2,
+  UsersRound,
 } from "lucide-react";
+import Select from "@/components/Select";
+import Tooltip from "@/components/Tooltip";
 import { Button } from "@/components/ui/button";
 import { SessionDateTimePicker } from "@/components/ui/session-date-time-picker";
 import { useAuth } from "@/hooks/useAuth";
@@ -48,9 +56,26 @@ type AssignmentTarget = {
 };
 
 type StepValidationField = "gameName" | "date" | "location" | "participants" | null;
+type PartnerLinks = Record<string, string>;
+type AiPartnerPolicy = "prefer-partners" | "ignore-partners";
+type AiExistingAssignmentPolicy = "fill-empty-slots" | "reassign-all";
+type ParticipantSummaryGroup =
+  | {
+      type: "pair";
+      key: string;
+      participants: [LocalParticipant, LocalParticipant];
+    }
+  | {
+      type: "single";
+      key: string;
+      participant: LocalParticipant;
+    };
 
 const AGE_GROUP_OPTIONS = ["10s", "20s", "30s", "40s", "50s", "60s"];
 const LEVEL_OPTIONS: Grade[] = ["ROOKIE", "D", "C", "B", "A", "S", "SS"];
+const DEFAULT_AI_PARTNER_POLICY: AiPartnerPolicy = "prefer-partners";
+const DEFAULT_AI_EXISTING_ASSIGNMENT_POLICY: AiExistingAssignmentPolicy =
+  "fill-empty-slots";
 const GENDER_LABELS = {
   M: "남",
   F: "여",
@@ -63,6 +88,26 @@ const AGE_GROUP_LABELS = {
   "50s": "50대",
   "60s": "60대",
 } as const;
+const AI_EXISTING_ASSIGNMENT_POLICY_LABELS = {
+  "fill-empty-slots": "빈 슬롯만 채우기",
+  "reassign-all": "전체 다시 배정",
+} as const;
+const AI_PARTNER_POLICY_LABELS = {
+  "prefer-partners": "우선 붙여주기",
+  "ignore-partners": "무시하기",
+} as const;
+const GENDER_SELECT_OPTIONS = [
+  { value: "M", label: "남" },
+  { value: "F", label: "여" },
+] as const;
+const AGE_GROUP_SELECT_OPTIONS = AGE_GROUP_OPTIONS.map((ageGroup) => ({
+  value: ageGroup,
+  label: AGE_GROUP_LABELS[ageGroup as keyof typeof AGE_GROUP_LABELS] ?? ageGroup,
+}));
+const LEVEL_SELECT_OPTIONS = LEVEL_OPTIONS.map((level) => ({
+  value: level,
+  label: level,
+}));
 
 function buildCourts(count: number) {
   return Array.from({ length: count }, (_, index) => ({
@@ -126,6 +171,76 @@ function getGenderLabel(gender: "M" | "F") {
 
 function getAgeGroupLabel(ageGroup: string) {
   return AGE_GROUP_LABELS[ageGroup as keyof typeof AGE_GROUP_LABELS] ?? ageGroup;
+}
+
+function detachPartnerLinks(partnerLinks: PartnerLinks, participantId: string): PartnerLinks {
+  const nextLinks = { ...partnerLinks };
+  const partnerId = nextLinks[participantId];
+
+  delete nextLinks[participantId];
+  if (partnerId) {
+    delete nextLinks[partnerId];
+  }
+
+  return nextLinks;
+}
+
+function connectPartnerLinks(
+  partnerLinks: PartnerLinks,
+  leftParticipantId: string,
+  rightParticipantId: string
+): PartnerLinks {
+  if (leftParticipantId === rightParticipantId) {
+    return partnerLinks;
+  }
+
+  let nextLinks = detachPartnerLinks(partnerLinks, leftParticipantId);
+  nextLinks = detachPartnerLinks(nextLinks, rightParticipantId);
+
+  nextLinks[leftParticipantId] = rightParticipantId;
+  nextLinks[rightParticipantId] = leftParticipantId;
+
+  return nextLinks;
+}
+
+function buildParticipantSummaryGroups(
+  participants: LocalParticipant[],
+  partnerLinks: PartnerLinks
+): ParticipantSummaryGroup[] {
+  const participantById = new Map(
+    participants.map((participant) => [participant.clientId, participant])
+  );
+  const visited = new Set<string>();
+  const groups: ParticipantSummaryGroup[] = [];
+
+  for (const participant of participants) {
+    if (visited.has(participant.clientId)) {
+      continue;
+    }
+
+    const partnerId = partnerLinks[participant.clientId];
+    const partner = partnerId ? participantById.get(partnerId) : null;
+
+    if (partner) {
+      visited.add(participant.clientId);
+      visited.add(partner.clientId);
+      groups.push({
+        type: "pair",
+        key: [participant.clientId, partner.clientId].sort().join(":"),
+        participants: [participant, partner],
+      });
+      continue;
+    }
+
+    visited.add(participant.clientId);
+    groups.push({
+      type: "single",
+      key: participant.clientId,
+      participant,
+    });
+  }
+
+  return groups;
 }
 
 const BadmintonCourt = ({
@@ -226,15 +341,53 @@ export default function CreateFreeGamePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitErrorField, setSubmitErrorField] = useState<StepValidationField>(null);
+  const [partnerLinks, setPartnerLinks] = useState<PartnerLinks>({});
+  const [partnerSelectionSourceId, setPartnerSelectionSourceId] = useState<string | null>(null);
+  const [aiPartnerPolicy, setAiPartnerPolicy] =
+    useState<AiPartnerPolicy>(DEFAULT_AI_PARTNER_POLICY);
+  const [aiExistingAssignmentPolicy, setAiExistingAssignmentPolicy] =
+    useState<AiExistingAssignmentPolicy>(DEFAULT_AI_EXISTING_ASSIGNMENT_POLICY);
+  const [lastAddedParticipantId, setLastAddedParticipantId] = useState<string | null>(null);
   const isParticipantNameComposingRef = useRef(false);
   const submitParticipantAfterCompositionRef = useRef(false);
   const skipNextParticipantEnterRef = useRef(false);
+  const participantListRef = useRef<HTMLDivElement | null>(null);
+  const participantRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) {
       window.location.href = "/login?returnTo=/court-manager/create";
     }
   }, [isLoading, isLoggedIn]);
+
+  useEffect(() => {
+    if (!lastAddedParticipantId) {
+      return;
+    }
+
+    const containerElement = participantListRef.current;
+    const rowElement = participantRowRefs.current[lastAddedParticipantId];
+    if (containerElement && rowElement && containerElement.scrollHeight > containerElement.clientHeight) {
+      const containerRect = containerElement.getBoundingClientRect();
+      const rowRect = rowElement.getBoundingClientRect();
+      const rowTop = rowRect.top - containerRect.top + containerElement.scrollTop;
+      const rowBottom = rowTop + rowRect.height;
+      const visibleTop = containerElement.scrollTop;
+      const visibleBottom = visibleTop + containerElement.clientHeight;
+
+      if (rowBottom > visibleBottom) {
+        containerElement.scrollTo({
+          top: rowBottom - containerElement.clientHeight,
+        });
+      } else if (rowTop < visibleTop) {
+        containerElement.scrollTo({
+          top: rowTop,
+        });
+      }
+    }
+
+    setLastAddedParticipantId(null);
+  }, [lastAddedParticipantId, participants]);
 
   const addRoundBlock = () => {
     setRounds((prev) => [
@@ -276,6 +429,18 @@ export default function CreateFreeGamePage() {
   const closeParticipantAssignModal = () => {
     setIsParticipantAssignModalOpen(false);
     setAssignmentTarget(null);
+  };
+
+  const cycleAiPartnerPolicy = () => {
+    setAiPartnerPolicy((current) =>
+      current === "prefer-partners" ? "ignore-partners" : "prefer-partners"
+    );
+  };
+
+  const cycleAiExistingAssignmentPolicy = () => {
+    setAiExistingAssignmentPolicy((current) =>
+      current === "fill-empty-slots" ? "reassign-all" : "fill-empty-slots"
+    );
   };
 
   const getParticipantAssignmentConflict = (participant: LocalParticipant) => {
@@ -401,6 +566,7 @@ export default function CreateFreeGamePage() {
       gamesAssigned: 0,
     };
 
+    setLastAddedParticipantId(nextParticipant.clientId);
     setParticipants((prev) => [...prev, nextParticipant]);
     setNewParticipant({
       name: "",
@@ -408,6 +574,30 @@ export default function CreateFreeGamePage() {
       ageGroup: "20s",
       level: "C",
     });
+  };
+
+  const startPartnerSelection = (participantClientId: string) => {
+    setPartnerSelectionSourceId((current) =>
+      current === participantClientId ? null : participantClientId
+    );
+  };
+
+  const assignPartner = (participantClientId: string) => {
+    if (!partnerSelectionSourceId || partnerSelectionSourceId === participantClientId) {
+      return;
+    }
+
+    setPartnerLinks((current) =>
+      connectPartnerLinks(current, partnerSelectionSourceId, participantClientId)
+    );
+    setPartnerSelectionSourceId(null);
+  };
+
+  const clearPartner = (participantClientId: string) => {
+    setPartnerLinks((current) => detachPartnerLinks(current, participantClientId));
+    setPartnerSelectionSourceId((current) =>
+      current === participantClientId ? null : current
+    );
   };
 
   const handleSearchLocation = async () => {
@@ -468,6 +658,10 @@ export default function CreateFreeGamePage() {
     );
     setRounds(nextRounds);
     setParticipants(recalculateAssignments(nextParticipants, nextRounds));
+    setPartnerLinks((current) => detachPartnerLinks(current, participantClientId));
+    setPartnerSelectionSourceId((current) =>
+      current === participantClientId ? null : current
+    );
   };
 
   const handleNext = async () => {
@@ -644,14 +838,97 @@ export default function CreateFreeGamePage() {
         };
       })()
     : null;
+  const participantById = new Map(
+    participants.map((participant) => [participant.clientId, participant])
+  );
+  const partnerSelectionSource = partnerSelectionSourceId
+    ? participantById.get(partnerSelectionSourceId) ?? null
+    : null;
+  const participantSummaryGroups = buildParticipantSummaryGroups(participants, partnerLinks);
+  const hasPartnerPairs = participantSummaryGroups.some((group) => group.type === "pair");
+  const aiAssignmentIndicators = [
+    !hasPartnerPairs
+      ? {
+          key: "partner-policy",
+          icon: Handshake,
+          label: "파트너",
+          value: "설정된 파트너 없음",
+          interactive: false,
+          onClick: null,
+          className:
+            "border-slate-200 bg-slate-50 text-slate-400 hover:border-slate-200 hover:bg-slate-50",
+        }
+      : aiPartnerPolicy === "prefer-partners"
+      ? {
+          key: "partner-policy",
+          icon: Handshake,
+          label: "파트너",
+          value: AI_PARTNER_POLICY_LABELS["prefer-partners"],
+          interactive: true,
+          onClick: cycleAiPartnerPolicy,
+          className:
+            "border-violet-200 bg-violet-50 text-violet-700 hover:border-violet-400 hover:bg-white",
+        }
+      : {
+          key: "partner-policy",
+          icon: UsersRound,
+          label: "파트너",
+          value: AI_PARTNER_POLICY_LABELS["ignore-partners"],
+          interactive: true,
+          onClick: cycleAiPartnerPolicy,
+          className:
+            "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-white",
+        },
+    {
+      key: "balance-policy",
+      icon: Scale,
+      label: "실력",
+      value: "균형 우선",
+      interactive: false,
+      onClick: null,
+      className:
+        "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-400 hover:bg-white",
+    },
+    {
+      key: "repeat-matchups",
+      icon: ShieldCheck,
+      label: "매치업",
+      value: "중복 최소화",
+      interactive: false,
+      onClick: null,
+      className:
+        "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-400 hover:bg-white",
+    },
+    aiExistingAssignmentPolicy === "fill-empty-slots"
+      ? {
+          key: "existing-assignment-policy",
+          icon: LayoutGrid,
+          label: "기존 배정",
+          value: AI_EXISTING_ASSIGNMENT_POLICY_LABELS["fill-empty-slots"],
+          interactive: true,
+          onClick: cycleAiExistingAssignmentPolicy,
+          className:
+            "border-sky-200 bg-sky-50 text-sky-700 hover:border-sky-400 hover:bg-white",
+        }
+      : {
+          key: "existing-assignment-policy",
+          icon: Shuffle,
+          label: "기존 배정",
+          value: AI_EXISTING_ASSIGNMENT_POLICY_LABELS["reassign-all"],
+          interactive: true,
+          onClick: cycleAiExistingAssignmentPolicy,
+          className:
+            "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-400 hover:bg-white",
+        },
+  ];
 
   return (
     <div className="container mx-auto max-w-5xl px-4 py-8 md:px-8 lg:py-12">
-      <div className="mb-12">
+      <div className="mb-8 md:mb-10">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="font-display text-2xl font-bold uppercase tracking-tight text-slate-900 md:text-3xl">
-              Initialize Session
+            <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">
+              자유게임 생성
             </h1>
           </div>
           <div className="hidden items-center gap-2 text-[10px] font-mono uppercase tracking-widest sm:flex">
@@ -703,7 +980,7 @@ export default function CreateFreeGamePage() {
           {submitError || "\u00A0"}
         </div>
 
-        <div className="z-30 flex-1 p-6 md:p-10">
+        <div className="z-30 flex-1 px-5 py-3 md:px-10 md:py-5">
           <AnimatePresence mode="wait">
             {step === 1 && (
               <motion.div
@@ -712,13 +989,13 @@ export default function CreateFreeGamePage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
-                className="mx-auto max-w-2xl space-y-6"
+                className="mx-auto max-w-2xl space-y-5"
               >
-                <div className="mb-6 border-b-2 border-slate-100 pb-3">
+                <div className="mb-3 border-b-2 border-slate-100 pb-2">
                   <h2 className="font-display text-2xl font-bold text-slate-900">
                     자유게임 설정
                   </h2>
-                  <p className="mt-2 text-sm font-mono text-slate-500">
+                  <p className="mt-1 text-sm font-mono text-slate-500">
                     자유게임에 필요한 기본 정보를 입력하세요.
                   </p>
                 </div>
@@ -876,14 +1153,14 @@ export default function CreateFreeGamePage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
-                className="space-y-6"
+                className="space-y-5"
               >
-                <div className="mb-6 flex items-end justify-between border-b-2 border-slate-100 pb-3">
+                <div className="mb-3 flex flex-col justify-between gap-3 border-b-2 border-slate-100 pb-2 sm:flex-row sm:items-end">
                   <div>
                     <h2 className="font-display text-2xl font-bold uppercase text-slate-900">
                       참가자 구성
                     </h2>
-                    <p className="mt-2 text-sm font-mono text-slate-500">
+                    <p className="mt-1 text-sm font-mono text-slate-500">
                       참가자를 추가하고 등급을 지정해주세요.
                     </p>
                   </div>
@@ -897,127 +1174,123 @@ export default function CreateFreeGamePage() {
                   </div>
                 </div>
 
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="이름"
-                    className={`flex-1 rounded-none border-2 bg-slate-50 px-4 py-3 text-sm font-medium transition-colors focus:bg-white focus:outline-none ${
-                      submitErrorField === "participants"
-                        ? "border-red-300 focus:border-red-500"
-                        : "border-slate-200 focus:border-slate-900"
-                    }`}
-                    value={newParticipant.name}
-                    onChange={(event) => {
-                      if (submitErrorField === "participants") {
-                        setSubmitError("");
-                        setSubmitErrorField(null);
-                      }
+                <div className="flex flex-wrap gap-2">
+                  <div className="min-w-[220px] flex-[1.8]">
+                    <input
+                      type="text"
+                      placeholder="이름"
+                      className={`h-[50px] w-full rounded-none border-2 bg-slate-50 px-4 text-sm font-medium transition-colors focus:bg-white focus:outline-none ${
+                        submitErrorField === "participants"
+                          ? "border-red-300 focus:border-red-500"
+                          : "border-slate-200 focus:border-slate-900"
+                      }`}
+                      value={newParticipant.name}
+                      onChange={(event) => {
+                        if (submitErrorField === "participants") {
+                          setSubmitError("");
+                          setSubmitErrorField(null);
+                        }
 
-                      setNewParticipant((prev) => ({
-                        ...prev,
-                        name: event.target.value,
-                      }));
-                    }}
-                    onCompositionStart={() => {
-                      isParticipantNameComposingRef.current = true;
-                      submitParticipantAfterCompositionRef.current = false;
-                      skipNextParticipantEnterRef.current = false;
-                    }}
-                    onCompositionEnd={(event) => {
-                      const composedName = event.currentTarget.value;
-
-                      isParticipantNameComposingRef.current = false;
-                      setNewParticipant((prev) => ({
-                        ...prev,
-                        name: composedName,
-                      }));
-
-                      if (submitParticipantAfterCompositionRef.current) {
+                        setNewParticipant((prev) => ({
+                          ...prev,
+                          name: event.target.value,
+                        }));
+                      }}
+                      onCompositionStart={() => {
+                        isParticipantNameComposingRef.current = true;
                         submitParticipantAfterCompositionRef.current = false;
-                        skipNextParticipantEnterRef.current = true;
-                        requestAnimationFrame(() => {
-                          addParticipant(composedName);
-                        });
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") {
-                        return;
-                      }
-
-                      if (skipNextParticipantEnterRef.current) {
-                        event.preventDefault();
                         skipNextParticipantEnterRef.current = false;
-                        return;
+                      }}
+                      onCompositionEnd={(event) => {
+                        const composedName = event.currentTarget.value;
+
+                        isParticipantNameComposingRef.current = false;
+                        setNewParticipant((prev) => ({
+                          ...prev,
+                          name: composedName,
+                        }));
+
+                        if (submitParticipantAfterCompositionRef.current) {
+                          submitParticipantAfterCompositionRef.current = false;
+                          skipNextParticipantEnterRef.current = true;
+                          requestAnimationFrame(() => {
+                            addParticipant(composedName);
+                          });
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") {
+                          return;
+                        }
+
+                        if (skipNextParticipantEnterRef.current) {
+                          event.preventDefault();
+                          skipNextParticipantEnterRef.current = false;
+                          return;
+                        }
+
+                        const nativeEvent = event.nativeEvent as KeyboardEvent & {
+                          isComposing?: boolean;
+                          keyCode?: number;
+                        };
+                        const isComposing =
+                          isParticipantNameComposingRef.current ||
+                          nativeEvent.isComposing === true ||
+                          nativeEvent.keyCode === 229;
+
+                        event.preventDefault();
+
+                        if (isComposing) {
+                          submitParticipantAfterCompositionRef.current = true;
+                          return;
+                        }
+
+                        addParticipant();
+                      }}
+                    />
+                  </div>
+                  <div className="w-[88px] shrink-0">
+                    <Select
+                      variant="brutalist"
+                      value={newParticipant.gender}
+                      options={[...GENDER_SELECT_OPTIONS]}
+                      onChange={(event) =>
+                        setNewParticipant((prev) => ({
+                          ...prev,
+                          gender: event as "M" | "F",
+                        }))
                       }
-
-                      const nativeEvent = event.nativeEvent as KeyboardEvent & {
-                        isComposing?: boolean;
-                        keyCode?: number;
-                      };
-                      const isComposing =
-                        isParticipantNameComposingRef.current ||
-                        nativeEvent.isComposing === true ||
-                        nativeEvent.keyCode === 229;
-
-                      event.preventDefault();
-
-                      if (isComposing) {
-                        submitParticipantAfterCompositionRef.current = true;
-                        return;
+                    />
+                  </div>
+                  <div className="w-[104px] shrink-0">
+                    <Select
+                      variant="brutalist"
+                      value={newParticipant.ageGroup}
+                      options={AGE_GROUP_SELECT_OPTIONS}
+                      onChange={(event) =>
+                        setNewParticipant((prev) => ({
+                          ...prev,
+                          ageGroup: event,
+                        }))
                       }
-
-                      addParticipant();
-                    }}
-                  />
-                  <select
-                    className="w-20 rounded-none border-2 border-slate-200 bg-slate-50 px-2 py-3 text-sm font-medium transition-colors focus:border-slate-900 focus:bg-white focus:outline-none"
-                    value={newParticipant.gender}
-                    onChange={(event) =>
-                      setNewParticipant((prev) => ({
-                        ...prev,
-                        gender: event.target.value as "M" | "F",
-                      }))
-                    }
-                  >
-                    <option value="M">남</option>
-                    <option value="F">여</option>
-                  </select>
-                  <select
-                    className="w-24 rounded-none border-2 border-slate-200 bg-slate-50 px-2 py-3 text-sm font-medium transition-colors focus:border-slate-900 focus:bg-white focus:outline-none"
-                    value={newParticipant.ageGroup}
-                    onChange={(event) =>
-                      setNewParticipant((prev) => ({
-                        ...prev,
-                        ageGroup: event.target.value,
-                      }))
-                    }
-                  >
-                    {AGE_GROUP_OPTIONS.map((ageGroup) => (
-                      <option key={ageGroup} value={ageGroup}>
-                        {getAgeGroupLabel(ageGroup)}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="w-28 rounded-none border-2 border-slate-200 bg-slate-50 px-2 py-3 text-sm font-medium transition-colors focus:border-slate-900 focus:bg-white focus:outline-none"
-                    value={newParticipant.level}
-                    onChange={(event) =>
-                      setNewParticipant((prev) => ({
-                        ...prev,
-                        level: event.target.value as Grade,
-                      }))
-                    }
-                  >
-                    {LEVEL_OPTIONS.map((level) => (
-                      <option key={level} value={level}>
-                        {level}
-                      </option>
-                    ))}
-                  </select>
+                    />
+                  </div>
+                  <div className="w-[104px] shrink-0">
+                    <Select
+                      variant="brutalist"
+                      value={newParticipant.level}
+                      options={LEVEL_SELECT_OPTIONS}
+                      onChange={(event) =>
+                        setNewParticipant((prev) => ({
+                          ...prev,
+                          level: event as Grade,
+                        }))
+                      }
+                    />
+                  </div>
                   <Button
                     onClick={() => addParticipant()}
-                    className="h-auto rounded-none bg-slate-900 px-8 text-xs font-bold uppercase tracking-widest text-white hover:bg-slate-800"
+                    className="h-[50px] w-full rounded-none bg-slate-900 px-6 text-xs font-bold uppercase tracking-widest text-white hover:bg-slate-800 sm:w-[96px]"
                   >
                     추가
                   </Button>
@@ -1030,54 +1303,182 @@ export default function CreateFreeGamePage() {
                       : "border-slate-200"
                   }`}
                 >
-                    <div className="grid grid-cols-12 gap-4 border-b-2 border-slate-200 bg-slate-50 px-4 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                      <div className="col-span-1 text-center">ID</div>
-                    <div className="col-span-4">이름</div>
-                    <div className="col-span-2 text-center">성별</div>
-                    <div className="col-span-2 text-center">연령</div>
-                    <div className="col-span-2 text-center">등급</div>
-                    <div className="col-span-1 text-right">관리</div>
-                  </div>
-                  <div className="max-h-[300px] divide-y-2 divide-slate-100 overflow-y-auto">
-                    {participants.map((participant, index) => (
-                      <div
-                        key={participant.clientId}
-                        className="grid grid-cols-12 items-center gap-4 px-4 py-2 transition-colors hover:bg-slate-50"
-                      >
-                        <div className="col-span-1 text-center font-mono text-xs text-slate-400">
-                          {String(index + 1).padStart(2, "0")}
+                  {partnerSelectionSource ? (
+                    <div className="flex items-start justify-between gap-4 border-b-2 border-violet-200 bg-violet-50 px-4 py-3.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700">
+                          파트너 선택 모드
                         </div>
-                        <div className="col-span-4 text-sm font-bold text-slate-900">
-                          {participant.name}
-                        </div>
-                        <div className="col-span-2 text-center font-mono text-xs text-slate-600">
-                          {getGenderLabel(participant.gender)}
-                        </div>
-                        <div className="col-span-2 text-center font-mono text-xs text-slate-600">
-                          {getAgeGroupLabel(participant.ageGroup)}
-                        </div>
-                        <div className="col-span-2 flex justify-center">
-                          <span className="border-2 border-slate-200 bg-slate-100 px-2 py-1 text-xs font-mono font-bold uppercase text-slate-700">
-                            {participant.level}
+                        <div className="mt-1.5 flex items-center gap-2">
+                          <span className="border border-violet-200 bg-white px-2 py-1 text-xs font-bold text-slate-900">
+                            {partnerSelectionSource.name}
+                          </span>
+                          <span className="truncate text-sm font-medium text-slate-700">
+                            의 파트너를 선택하세요.
                           </span>
                         </div>
-                        <div className="col-span-1 flex justify-end">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
-                            onClick={() => removeParticipant(participant.clientId)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
                       </div>
-                    ))}
-                    {participants.length === 0 && (
-                      <div className="py-12 text-center font-mono text-xs uppercase tracking-widest text-slate-400">
-                        아직 추가된 참가자가 없습니다
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 rounded-none border-2 border-violet-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100"
+                        onClick={() => setPartnerSelectionSourceId(null)}
+                      >
+                        취소
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[860px]">
+                      <div className="grid grid-cols-[56px_minmax(0,2fr)_72px_88px_84px_minmax(0,1.5fr)_48px] gap-4 border-b-2 border-slate-200 bg-slate-50 px-4 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                        <div className="text-center">ID</div>
+                        <div className="text-center">이름</div>
+                        <div className="text-center">성별</div>
+                        <div className="text-center">연령</div>
+                        <div className="text-center">등급</div>
+                        <div className="text-center">파트너</div>
+                        <div className="text-center">관리</div>
                       </div>
-                    )}
+                      <div ref={participantListRef} className="max-h-[320px] overflow-y-auto bg-white">
+                        {participants.map((participant, index) => {
+                          const partner = partnerLinks[participant.clientId]
+                            ? participantById.get(partnerLinks[participant.clientId]) ?? null
+                            : null;
+                          const isPartnerSource =
+                            partnerSelectionSourceId === participant.clientId;
+                          const isPartnerCandidate =
+                            partnerSelectionSourceId !== null &&
+                            partnerSelectionSourceId !== participant.clientId;
+
+                          return (
+                            <div
+                              key={participant.clientId}
+                              ref={(element) => {
+                                participantRowRefs.current[participant.clientId] = element;
+                              }}
+                              onClick={() => {
+                                if (isPartnerCandidate) {
+                                  assignPartner(participant.clientId);
+                                }
+                              }}
+                              className={`grid grid-cols-[56px_minmax(0,2fr)_72px_88px_84px_minmax(0,1.5fr)_48px] items-center gap-4 px-4 py-3 transition-colors ${
+                                index > 0 ? "border-t-2 border-slate-100" : ""
+                              } ${
+                                isPartnerSource
+                                  ? "bg-violet-50"
+                                  : isPartnerCandidate
+                                    ? "cursor-pointer bg-white hover:bg-violet-50"
+                                    : "hover:bg-slate-50"
+                              }`}
+                            >
+                              <div className="text-center font-mono text-xs text-slate-400">
+                                {String(index + 1).padStart(2, "0")}
+                              </div>
+                              <div className="text-sm font-bold text-slate-900">
+                                {participant.name}
+                              </div>
+                              <div className="text-center font-mono text-xs text-slate-600">
+                                {getGenderLabel(participant.gender)}
+                              </div>
+                              <div className="text-center font-mono text-xs text-slate-600">
+                                {getAgeGroupLabel(participant.ageGroup)}
+                              </div>
+                              <div className="flex justify-center">
+                                <span className="border-2 border-slate-200 bg-slate-100 px-2 py-1 text-xs font-mono font-bold uppercase text-slate-700">
+                                  {participant.level}
+                                </span>
+                              </div>
+                              <div className="min-w-0">
+                                {isPartnerSource ? (
+                                  <div className="flex items-center gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
+                                    <span className="truncate text-xs font-bold text-slate-900">
+                                      {participant.name}
+                                    </span>
+                                    <span className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700">
+                                      파트너 선택 중
+                                    </span>
+                                  </div>
+                                ) : isPartnerCandidate ? (
+                                  <div className="flex items-center justify-between gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
+                                    <span
+                                      className={`shrink-0 border px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase tracking-widest ${
+                                        partner
+                                          ? "border-amber-200 bg-amber-50 text-amber-700"
+                                          : "border-violet-200 bg-white text-violet-700"
+                                      }`}
+                                    >
+                                      {partner ? "교체" : "선택"}
+                                    </span>
+                                    <span className="min-w-0 truncate text-xs font-bold text-slate-900">
+                                      이 참가자와 연결
+                                    </span>
+                                  </div>
+                                ) : partner ? (
+                                  <div className="flex items-center justify-between gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
+                                    <div className="min-w-0 truncate text-xs font-bold text-slate-900">
+                                      {partner.name}
+                                    </div>
+                                    <div className="flex shrink-0 items-center gap-1">
+                                      <button
+                                        type="button"
+                                        className="border border-violet-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          startPartnerSelection(participant.clientId);
+                                        }}
+                                      >
+                                        변경
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-500"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          clearPartner(participant.clientId);
+                                        }}
+                                      >
+                                        해제
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-9 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      startPartnerSelection(participant.clientId);
+                                    }}
+                                  >
+                                    파트너 지정
+                                  </Button>
+                                )}
+                              </div>
+                              <div className="flex justify-end">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    removeParticipant(participant.clientId);
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {participants.length === 0 && (
+                          <div className="py-12 text-center font-mono text-xs uppercase tracking-widest text-slate-400">
+                            아직 추가된 참가자가 없습니다
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -1090,26 +1491,57 @@ export default function CreateFreeGamePage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
-                className="space-y-6"
+                className="space-y-5"
               >
-                <div className="mb-6 flex flex-col justify-between gap-4 border-b-2 border-slate-100 pb-3 sm:flex-row sm:items-end">
+                <div className="mb-3 flex flex-col justify-between gap-3 border-b-2 border-slate-100 pb-2 sm:flex-row sm:items-end">
                   <div>
                     <h2 className="font-display text-2xl font-bold uppercase text-slate-900">
                       코트 배정
                     </h2>
-                    <p className="mt-2 text-sm font-mono text-slate-500">
+                    <p className="mt-1 text-sm font-mono text-slate-500">
                       배정할 코트 슬롯을 먼저 선택한 뒤 참가자를 등록하세요.
                     </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled
-                    className="cursor-not-allowed rounded-none border-2 border-slate-300 font-mono text-[10px] uppercase tracking-widest text-slate-400 hover:bg-transparent"
-                  >
-                    <Activity className="mr-2 h-3 w-3" />
-                    자동 배정 · 개발 중
-                  </Button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex items-center gap-2">
+                      {aiAssignmentIndicators.map((item) => {
+                        const Icon = item.icon;
+
+                        return (
+                          <Tooltip
+                            key={item.key}
+                            message={`${item.label}: ${item.value}`}
+                            position="top"
+                          >
+                            {item.interactive ? (
+                              <button
+                                type="button"
+                                aria-label={`${item.label}: ${item.value}`}
+                                onClick={item.onClick ?? undefined}
+                                className={`flex h-9 w-9 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors ${item.className}`}
+                              >
+                                <Icon className="h-4 w-4" />
+                              </button>
+                            ) : (
+                              <div
+                                className={`flex h-9 w-9 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors ${item.className}`}
+                              >
+                                <Icon className="h-4 w-4" />
+                              </div>
+                            )}
+                          </Tooltip>
+                        );
+                      })}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="rounded-none bg-emerald-500 font-mono text-[10px] uppercase tracking-widest text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-emerald-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none"
+                    >
+                      <Activity className="mr-2 h-3 w-3" />
+                      AI 자동 배정
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="space-y-6">
@@ -1119,25 +1551,56 @@ export default function CreateFreeGamePage() {
                         참가자 요약
                       </h3>
                     </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
-                      {participants.map((participant) => (
-                        <div
-                          key={participant.clientId}
-                          className="flex items-center justify-between border border-slate-200 bg-white p-2 text-left text-xs"
-                        >
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
-                            <span className="truncate font-bold text-slate-900">
-                              {participant.name}
-                            </span>
-                            <span className="shrink-0 font-mono text-slate-500">
-                              {getGenderLabel(participant.gender)}/{getAgeGroupLabel(participant.ageGroup)}
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      {participantSummaryGroups.map((group) =>
+                        group.type === "pair" ? (
+                          <div key={group.key} className="relative xl:col-span-2">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {group.participants.map((participant) => (
+                                <div
+                                  key={participant.clientId}
+                                  className="flex items-center justify-between border-2 border-violet-400 bg-violet-50/20 p-3 text-left text-xs"
+                                >
+                                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                                    <span className="truncate font-bold text-slate-900">
+                                      {participant.name}
+                                    </span>
+                                    <span className="shrink-0 font-mono text-slate-500">
+                                      {getGenderLabel(participant.gender)}/
+                                      {getAgeGroupLabel(participant.ageGroup)}
+                                    </span>
+                                  </div>
+                                  <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
+                                    게임 수 {participant.gamesAssigned}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="pointer-events-none absolute top-1/2 left-1/2 hidden h-[3px] w-4 -translate-x-1/2 -translate-y-1/2 bg-violet-500 sm:block" />
+                            <div className="mt-2 flex items-center justify-center sm:hidden">
+                              <div className="h-[3px] w-4 bg-violet-500" />
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            key={group.key}
+                            className="flex items-center justify-between border border-slate-200 bg-white p-3 text-left text-xs"
+                          >
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <span className="truncate font-bold text-slate-900">
+                                {group.participant.name}
+                              </span>
+                              <span className="shrink-0 font-mono text-slate-500">
+                                {getGenderLabel(group.participant.gender)}/
+                                {getAgeGroupLabel(group.participant.ageGroup)}
+                              </span>
+                            </div>
+                            <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
+                              게임 수 {group.participant.gamesAssigned}
                             </span>
                           </div>
-                          <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
-                            게임 수 {participant.gamesAssigned}
-                          </span>
-                        </div>
-                      ))}
+                        )
+                      )}
                     </div>
                   </div>
 
