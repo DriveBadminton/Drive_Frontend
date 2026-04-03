@@ -11,6 +11,7 @@ type Props = {
   disabled?: boolean;
   onChange: (value: string) => void;
   className?: string;
+  variant?: "default" | "brutalist";
 };
 
 export default function Select({
@@ -20,6 +21,7 @@ export default function Select({
   disabled = false,
   onChange,
   className = "",
+  variant = "default",
 }: Props) {
   const buttonId = useId();
   const listboxId = useId();
@@ -145,6 +147,38 @@ export default function Select({
 
   const activeOptionId =
     activeIndex >= 0 ? `${listboxId}-opt-${activeIndex}` : undefined;
+  const styles =
+    variant === "brutalist"
+      ? {
+          trigger:
+            "h-[50px] w-full rounded-none border-2 border-slate-200 bg-slate-50 py-3 pl-3 pr-9 text-left text-sm font-medium text-slate-900 transition-colors hover:bg-white disabled:opacity-60 focus-visible:outline-none focus-visible:border-slate-900",
+          iconWrap:
+            "pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-500",
+          icon: "h-4 w-4",
+          menu:
+            "absolute z-50 mt-2 w-full max-h-[280px] overflow-y-auto border-2 border-slate-900 bg-white p-1 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] outline-none",
+          option: {
+            base: "flex w-full items-center justify-between rounded-none px-3 py-2 text-sm font-medium text-slate-900 transition-colors",
+            selected: "bg-teal-50 text-slate-900",
+            active: "bg-slate-100",
+            check: "h-4 w-4 text-teal-600",
+          },
+        }
+      : {
+          trigger:
+            "w-full rounded-xl border border-border bg-background pl-4 pr-12 py-3 text-left text-sm text-foreground shadow-sm transition-colors hover:bg-background-secondary disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          iconWrap:
+            "pointer-events-none absolute inset-y-0 right-4 flex items-center text-foreground-muted",
+          icon: "h-5 w-5",
+          menu:
+            "absolute z-50 mt-2 w-full max-h-[280px] overflow-y-auto custom-scrollbar rounded-xl border border-border bg-background-secondary p-1 shadow-lg outline-none",
+          option: {
+            base: "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors text-foreground",
+            selected: "bg-primary/20 text-foreground",
+            active: "bg-foreground-muted/10",
+            check: "h-4 w-4 text-primary",
+          },
+        };
 
   return (
     <div ref={rootRef} className={`relative ${className}`}>
@@ -158,14 +192,14 @@ export default function Select({
         aria-controls={listboxId}
         onClick={() => (open ? closeMenu() : openMenu())}
         onKeyDown={onButtonKeyDown}
-        className="w-full rounded-xl border border-border bg-background pl-4 pr-12 py-3 text-left text-sm text-foreground shadow-sm transition-colors hover:bg-background-secondary disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        className={styles.trigger}
       >
         <span className={selected ? "" : "text-foreground-muted"}>
           {selected ? selected.label : placeholder}
         </span>
-        <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-foreground-muted">
+        <span className={styles.iconWrap}>
           <svg
-            className="h-5 w-5"
+            className={styles.icon}
             viewBox="0 0 20 20"
             fill="currentColor"
             aria-hidden="true"
@@ -188,7 +222,7 @@ export default function Select({
           aria-activedescendant={activeOptionId}
           tabIndex={-1}
           onKeyDown={onListKeyDown}
-          className="absolute z-50 mt-2 w-full max-h-[280px] overflow-y-auto custom-scrollbar rounded-xl border border-border bg-background-secondary p-1 shadow-lg outline-none"
+          className={styles.menu}
         >
           {options.map((opt, idx) => {
             const isSelected = opt.value === value;
@@ -207,16 +241,14 @@ export default function Select({
                   closeMenu();
                   buttonRef.current?.focus();
                 }}
-                className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
-                  isSelected
-                    ? "bg-primary/20 text-foreground"
-                    : "text-foreground"
-                } ${isActive ? "bg-foreground-muted/10" : ""}`}
+                className={`${styles.option.base} ${
+                  isSelected ? styles.option.selected : ""
+                } ${isActive ? styles.option.active : ""}`}
               >
                 <span>{opt.label}</span>
                 {isSelected && (
                   <svg
-                    className="h-4 w-4 text-primary"
+                    className={styles.option.check}
                     viewBox="0 0 20 20"
                     fill="currentColor"
                     aria-hidden="true"
