@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
+import { getUserFacingErrorMessage } from "@/lib/api";
 import {
   CourtMatch,
   Game,
@@ -309,9 +310,7 @@ export default function ManagerGameDetailPage() {
       } catch (error) {
         if (!cancelled) {
           setPageError(
-            error instanceof Error
-              ? error.message
-              : "게임을 불러오는데 실패했습니다."
+            getUserFacingErrorMessage(error, "게임을 불러오지 못했어요.")
           );
         }
       } finally {

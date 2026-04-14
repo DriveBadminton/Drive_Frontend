@@ -25,10 +25,26 @@ import Tooltip from "@/components/Tooltip";
 import { Button } from "@/components/ui/button";
 import { SessionDateTimePicker } from "@/components/ui/session-date-time-picker";
 import { useAuth } from "@/hooks/useAuth";
-import { createFreeGame, Grade } from "@/lib/game";
+import { getUserFacingErrorMessage, isApiError } from "@/lib/api";
+import {
+  createFreeGame,
+  createFreeGameAssignmentPreview,
+  getFreeGameAssignmentPreviewJob,
+  Grade,
+  type CreateGameAssignmentPreviewResponse,
+} from "@/lib/game";
 import { validateParticipantName } from "@/lib/participant";
 import { searchPlaces, type PlaceSearchResult } from "@/lib/place";
 import { pushRecentGameId } from "@/lib/recent-games";
+import {
+  applyAssignmentPreviewToRounds,
+  AssignmentPreviewContractError,
+  buildAssignmentPreviewRequest,
+  buildAssignmentPreviewRequestKey,
+  createAssignmentPreviewRequestKey,
+  matchesAssignmentPreviewRequestKey,
+  validateAssignmentPreviewResponse,
+} from "./assignmentPreview";
 
 type LocalParticipant = {
   clientId: string;
@@ -76,6 +92,15 @@ const LEVEL_OPTIONS: Grade[] = ["ROOKIE", "D", "C", "B", "A", "S", "SS"];
 const DEFAULT_AI_PARTNER_POLICY: AiPartnerPolicy = "prefer-partners";
 const DEFAULT_AI_EXISTING_ASSIGNMENT_POLICY: AiExistingAssignmentPolicy =
   "fill-empty-slots";
+const AI_PREVIEW_STALE_MESSAGE =
+  "자동 배정 결과가 준비되었지만 현재 배정이 바뀌어 적용하지 않았어요. 다시 자동 배정을 실행해주세요.";
+const AI_PREVIEW_POLLING_RETRY_MESSAGE =
+  "자동 배정 상태를 다시 확인하는 중이에요. 결과가 확인될 때까지 편집은 잠시 잠겨 있어요.";
+const AI_PREVIEW_GENERIC_FAILURE_MESSAGE =
+  "자동 배정을 완료하지 못했어요. 잠시 후 다시 시도해주세요.";
+const AI_PREVIEW_POLL_RETRY_DELAY_MS = 1000;
+const AI_PREVIEW_POLL_DEGRADED_DELAY_MS = 5000;
+const AI_PREVIEW_POLL_DEGRADED_THRESHOLD = 3;
 const GENDER_LABELS = {
   M: "남",
   F: "여",
@@ -243,15 +268,46 @@ function buildParticipantSummaryGroups(
   return groups;
 }
 
+function hasAssignmentChanges(currentRounds: LocalRound[], nextRounds: LocalRound[]) {
+  return currentRounds.some((round, roundIndex) =>
+    round.courts.some((court, courtIndex) =>
+      court.assignedParticipants.some((participant, slotIndex) => {
+        const nextParticipant =
+          nextRounds[roundIndex]?.courts[courtIndex]?.assignedParticipants[slotIndex] ?? null;
+
+        return participant?.clientId !== nextParticipant?.clientId;
+      })
+    )
+  );
+}
+
+function getAiPreviewSummaryMessage(
+  warnings: CreateGameAssignmentPreviewResponse["warnings"]
+) {
+  const warningCodes = new Set(warnings.map((warning) => warning.code));
+
+  if (warningCodes.has("PARTIAL_ASSIGNMENT")) {
+    return "지금 구성으로는 더 배정할 수 있는 자리가 없어요. 참가자 수나 라운드 구성을 확인해주세요.";
+  }
+
+  if (warningCodes.has("PARTNER_CONSTRAINT_PARTIAL")) {
+    return "지정한 파트너를 모두 함께 배정하기 어려워 현재 배정을 유지했어요.";
+  }
+
+  return "현재 구성으로는 자동 배정을 더 진행하기 어려워요. 코트와 참가자 구성을 다시 확인해주세요.";
+}
+
 const BadmintonCourt = ({
   court,
   roundId,
   assignmentTarget,
+  isLocked,
   selectAssignmentTarget,
 }: {
   court: LocalCourt;
   roundId: string;
   assignmentTarget: AssignmentTarget | null;
+  isLocked: boolean;
   selectAssignmentTarget: (roundId: string, courtId: string, slotIndex: number) => void;
 }) => {
   return (
@@ -296,9 +352,12 @@ const BadmintonCourt = ({
               ) : (
                 <button
                   type="button"
+                  disabled={isLocked}
                   onClick={() => selectAssignmentTarget(roundId, court.id, index)}
                   className={`flex h-6 w-full max-w-[46px] items-center justify-center rounded-none border-2 text-[8px] font-bold uppercase tracking-widest shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all ${
-                    isSelectedTarget
+                    isLocked
+                      ? "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-400 shadow-none"
+                      : isSelectedTarget
                       ? "border-teal-500 bg-teal-100 text-teal-900 ring-2 ring-teal-300/60"
                       : "border-slate-900 bg-teal-400 text-slate-900 hover:bg-teal-300 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none"
                   }`}
@@ -347,18 +406,56 @@ export default function CreateFreeGamePage() {
     useState<AiPartnerPolicy>(DEFAULT_AI_PARTNER_POLICY);
   const [aiExistingAssignmentPolicy, setAiExistingAssignmentPolicy] =
     useState<AiExistingAssignmentPolicy>(DEFAULT_AI_EXISTING_ASSIGNMENT_POLICY);
+  const [isGeneratingAiPreview, setIsGeneratingAiPreview] = useState(false);
   const [lastAddedParticipantId, setLastAddedParticipantId] = useState<string | null>(null);
+  const isAssignmentEditingLocked = isGeneratingAiPreview;
   const isParticipantNameComposingRef = useRef(false);
   const submitParticipantAfterCompositionRef = useRef(false);
   const skipNextParticipantEnterRef = useRef(false);
   const participantListRef = useRef<HTMLDivElement | null>(null);
   const participantRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const activePreviewJobIdRef = useRef<string | null>(null);
+  const previewPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewPollFailureCountRef = useRef(0);
+  const roundsRef = useRef(rounds);
+  const participantsRef = useRef(participants);
+  const partnerLinksRef = useRef(partnerLinks);
+  const aiPartnerPolicyRef = useRef(aiPartnerPolicy);
+  const aiExistingAssignmentPolicyRef = useRef(aiExistingAssignmentPolicy);
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) {
       window.location.href = "/login?returnTo=/court-manager/create";
     }
   }, [isLoading, isLoggedIn]);
+
+  useEffect(() => {
+    roundsRef.current = rounds;
+  }, [rounds]);
+
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  useEffect(() => {
+    partnerLinksRef.current = partnerLinks;
+  }, [partnerLinks]);
+
+  useEffect(() => {
+    aiPartnerPolicyRef.current = aiPartnerPolicy;
+  }, [aiPartnerPolicy]);
+
+  useEffect(() => {
+    aiExistingAssignmentPolicyRef.current = aiExistingAssignmentPolicy;
+  }, [aiExistingAssignmentPolicy]);
+
+  useEffect(() => {
+    return () => {
+      if (previewPollTimeoutRef.current) {
+        clearTimeout(previewPollTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!lastAddedParticipantId) {
@@ -390,6 +487,10 @@ export default function CreateFreeGamePage() {
   }, [lastAddedParticipantId, participants]);
 
   const addRoundBlock = () => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     setRounds((prev) => [
       ...prev,
       { id: getNextOrdinalId(prev, "round"), courts: buildCourts(courts) },
@@ -397,6 +498,10 @@ export default function CreateFreeGamePage() {
   };
 
   const addCourtToRound = (roundId: string) => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     setRounds((prev) =>
       prev.map((round) =>
         round.id === roundId
@@ -420,6 +525,10 @@ export default function CreateFreeGamePage() {
     courtId: string,
     slotIndex: number
   ) => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     setSubmitError("");
     setSubmitErrorField(null);
     setAssignmentTarget({ roundId, courtId, slotIndex });
@@ -432,15 +541,211 @@ export default function CreateFreeGamePage() {
   };
 
   const cycleAiPartnerPolicy = () => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     setAiPartnerPolicy((current) =>
       current === "prefer-partners" ? "ignore-partners" : "prefer-partners"
     );
   };
 
   const cycleAiExistingAssignmentPolicy = () => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     setAiExistingAssignmentPolicy((current) =>
-      current === "fill-empty-slots" ? "reassign-all" : "fill-empty-slots"
+        current === "fill-empty-slots" ? "reassign-all" : "fill-empty-slots"
     );
+  };
+
+  const clearPreviewPolling = () => {
+    if (previewPollTimeoutRef.current) {
+      clearTimeout(previewPollTimeoutRef.current);
+      previewPollTimeoutRef.current = null;
+    }
+    previewPollFailureCountRef.current = 0;
+  };
+
+  const finishPreviewJob = () => {
+    clearPreviewPolling();
+    activePreviewJobIdRef.current = null;
+    setIsGeneratingAiPreview(false);
+  };
+
+  const getCurrentAssignmentPreviewRequestKey = () =>
+    buildAssignmentPreviewRequestKey({
+      participants: participantsRef.current,
+      rounds: roundsRef.current,
+      partnerLinks: partnerLinksRef.current,
+      partnerPolicy: aiPartnerPolicyRef.current,
+      existingAssignmentPolicy: aiExistingAssignmentPolicyRef.current,
+    });
+
+  const schedulePreviewJobPoll = (
+    jobId: string,
+    submittedRequestKey: string,
+    delayMs = 1000
+  ) => {
+    if (previewPollTimeoutRef.current) {
+      clearTimeout(previewPollTimeoutRef.current);
+    }
+
+    previewPollTimeoutRef.current = setTimeout(() => {
+      void pollPreviewJob(jobId, submittedRequestKey);
+    }, delayMs);
+  };
+
+  const pollPreviewJob = async (jobId: string, submittedRequestKey: string) => {
+    previewPollTimeoutRef.current = null;
+
+    try {
+      const job = await getFreeGameAssignmentPreviewJob(jobId);
+      previewPollFailureCountRef.current = 0;
+      setSubmitError("");
+      setSubmitErrorField(null);
+
+      if (job.status === "QUEUED" || job.status === "RUNNING") {
+        schedulePreviewJobPoll(jobId, submittedRequestKey, AI_PREVIEW_POLL_RETRY_DELAY_MS);
+        return;
+      }
+
+      finishPreviewJob();
+
+      if (job.status === "FAILED") {
+        setSubmitError(
+          job.failure?.message ||
+            AI_PREVIEW_GENERIC_FAILURE_MESSAGE
+        );
+        setSubmitErrorField(null);
+        return;
+      }
+
+      if (!job.preview) {
+        setSubmitError(AI_PREVIEW_GENERIC_FAILURE_MESSAGE);
+        setSubmitErrorField(null);
+        return;
+      }
+
+      const currentRequestKey = getCurrentAssignmentPreviewRequestKey();
+      if (!matchesAssignmentPreviewRequestKey(currentRequestKey, submittedRequestKey)) {
+        setSubmitError(AI_PREVIEW_STALE_MESSAGE);
+        setSubmitErrorField(null);
+        return;
+      }
+
+      const currentRounds = roundsRef.current;
+      const currentParticipants = participantsRef.current;
+      const preview = validateAssignmentPreviewResponse({
+        preview: job.preview,
+        rounds: currentRounds,
+        participants: currentParticipants,
+      });
+      const nextRounds = applyAssignmentPreviewToRounds(
+        currentRounds,
+        preview.rounds,
+        currentParticipants
+      );
+      const hasChanges = hasAssignmentChanges(currentRounds, nextRounds);
+
+      setRounds(nextRounds);
+      setParticipants((prev) => recalculateAssignments(prev, nextRounds));
+      setIsParticipantAssignModalOpen(false);
+      setAssignmentTarget(null);
+      setSubmitError(
+        !hasChanges && preview.warnings.length > 0
+          ? getAiPreviewSummaryMessage(preview.warnings)
+          : ""
+      );
+      setSubmitErrorField(null);
+    } catch (error) {
+      if (error instanceof AssignmentPreviewContractError) {
+        finishPreviewJob();
+        setSubmitError(error.message);
+        setSubmitErrorField(null);
+        return;
+      }
+
+      previewPollFailureCountRef.current += 1;
+      if (
+        isApiError(error) &&
+        error.status === 404
+      ) {
+        finishPreviewJob();
+        setSubmitError(AI_PREVIEW_GENERIC_FAILURE_MESSAGE);
+        setSubmitErrorField(null);
+        return;
+      }
+
+      if (previewPollFailureCountRef.current >= AI_PREVIEW_POLL_DEGRADED_THRESHOLD) {
+        setSubmitError(AI_PREVIEW_POLLING_RETRY_MESSAGE);
+        setSubmitErrorField(null);
+        schedulePreviewJobPoll(
+          jobId,
+          submittedRequestKey,
+          AI_PREVIEW_POLL_DEGRADED_DELAY_MS
+        );
+        return;
+      }
+
+      schedulePreviewJobPoll(jobId, submittedRequestKey, AI_PREVIEW_POLL_RETRY_DELAY_MS);
+    }
+  };
+
+  const handleGenerateAiPreview = async () => {
+    if (isGeneratingAiPreview) {
+      return;
+    }
+
+    const stepValidation = getStepValidationResult(3);
+    if (stepValidation) {
+      setSubmitError(stepValidation.message);
+      setSubmitErrorField(stepValidation.field);
+      return;
+    }
+
+    setSubmitError("");
+    setSubmitErrorField(null);
+    setIsParticipantAssignModalOpen(false);
+    setAssignmentTarget(null);
+    setPartnerSelectionSourceId(null);
+    setIsGeneratingAiPreview(true);
+    let submittedJobId: string | null = null;
+
+    try {
+      const request = buildAssignmentPreviewRequest({
+        participants,
+        rounds,
+        partnerLinks,
+        partnerPolicy: aiPartnerPolicy,
+        existingAssignmentPolicy: aiExistingAssignmentPolicy,
+      });
+      const requestKey = createAssignmentPreviewRequestKey(request);
+      const job = await createFreeGameAssignmentPreview(request);
+      submittedJobId = job.jobId;
+
+      activePreviewJobIdRef.current = job.jobId;
+      schedulePreviewJobPoll(job.jobId, requestKey, job.pollAfterMs);
+    } catch (error) {
+      if (error instanceof AssignmentPreviewContractError) {
+        setSubmitError(error.message);
+        setSubmitErrorField(null);
+        return;
+      }
+
+      setSubmitError(
+        getUserFacingErrorMessage(
+          error,
+          "자동 배정을 완료하지 못했어요. 잠시 후 다시 시도해주세요."
+        )
+      );
+      setSubmitErrorField(null);
+    } finally {
+      if (!submittedJobId) {
+        setIsGeneratingAiPreview(false);
+      }
+    }
   };
 
   const getParticipantAssignmentConflict = (participant: LocalParticipant) => {
@@ -477,7 +782,7 @@ export default function CreateFreeGamePage() {
   };
 
   const assignParticipantToTarget = (participant: LocalParticipant) => {
-    if (!assignmentTarget) {
+    if (isAssignmentEditingLocked || !assignmentTarget) {
       return;
     }
 
@@ -511,6 +816,10 @@ export default function CreateFreeGamePage() {
   };
 
   const removeCourtFromRound = (roundId: string, courtId: string) => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     const nextRounds = rounds.map((round) =>
       round.id === roundId
         ? {
@@ -532,6 +841,10 @@ export default function CreateFreeGamePage() {
   };
 
   const removeRoundBlock = (roundId: string) => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     const nextRounds = rounds.filter((round) => round.id !== roundId);
 
     setRounds(nextRounds);
@@ -543,6 +856,10 @@ export default function CreateFreeGamePage() {
   };
 
   const addParticipant = (participantName = newParticipant.name) => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     const trimmedParticipantName = participantName.trim();
 
     const participantNameError = validateParticipantName(trimmedParticipantName);
@@ -577,12 +894,20 @@ export default function CreateFreeGamePage() {
   };
 
   const startPartnerSelection = (participantClientId: string) => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     setPartnerSelectionSourceId((current) =>
       current === participantClientId ? null : participantClientId
     );
   };
 
   const assignPartner = (participantClientId: string) => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     if (!partnerSelectionSourceId || partnerSelectionSourceId === participantClientId) {
       return;
     }
@@ -594,6 +919,10 @@ export default function CreateFreeGamePage() {
   };
 
   const clearPartner = (participantClientId: string) => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     setPartnerLinks((current) => detachPartnerLinks(current, participantClientId));
     setPartnerSelectionSourceId((current) =>
       current === participantClientId ? null : current
@@ -624,9 +953,10 @@ export default function CreateFreeGamePage() {
     } catch (error) {
       setLocationResults([]);
       setLocationSearchError(
-        error instanceof Error
-          ? error.message
-          : "장소 검색 중 오류가 발생했습니다."
+        getUserFacingErrorMessage(
+          error,
+          "장소를 찾지 못했어요. 잠시 후 다시 시도해주세요."
+        )
       );
     } finally {
       setIsSearchingLocation(false);
@@ -644,6 +974,10 @@ export default function CreateFreeGamePage() {
   };
 
   const removeParticipant = (participantClientId: string) => {
+    if (isAssignmentEditingLocked) {
+      return;
+    }
+
     const nextRounds = rounds.map((round) => ({
       ...round,
       courts: round.courts.map((court) => ({
@@ -667,6 +1001,10 @@ export default function CreateFreeGamePage() {
   const handleNext = async () => {
     setSubmitError("");
     setSubmitErrorField(null);
+
+    if (step === 3 && isGeneratingAiPreview) {
+      return;
+    }
 
     const stepValidation = getStepValidationResult(step);
     if (stepValidation) {
@@ -719,7 +1057,10 @@ export default function CreateFreeGamePage() {
         setStep(4);
       } catch (error) {
         setSubmitError(
-          error instanceof Error ? error.message : "세션 생성에 실패했습니다."
+          getUserFacingErrorMessage(
+            error,
+            "세션을 만들지 못했어요. 잠시 후 다시 시도해주세요."
+          )
         );
       } finally {
         setIsSubmitting(false);
@@ -1096,8 +1437,14 @@ export default function CreateFreeGamePage() {
                         <Button
                           variant="outline"
                           size="icon"
+                          disabled={isGeneratingAiPreview}
                           className="h-12 w-12 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
-                          onClick={() => setCourts((prev) => Math.max(1, prev - 1))}
+                          onClick={() => {
+                            if (isGeneratingAiPreview) {
+                              return;
+                            }
+                            setCourts((prev) => Math.max(1, prev - 1));
+                          }}
                         >
                           -
                         </Button>
@@ -1107,8 +1454,14 @@ export default function CreateFreeGamePage() {
                         <Button
                           variant="outline"
                           size="icon"
+                          disabled={isGeneratingAiPreview}
                           className="h-12 w-12 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
-                          onClick={() => setCourts((prev) => prev + 1)}
+                          onClick={() => {
+                            if (isGeneratingAiPreview) {
+                              return;
+                            }
+                            setCourts((prev) => prev + 1);
+                          }}
                         >
                           +
                         </Button>
@@ -1123,8 +1476,14 @@ export default function CreateFreeGamePage() {
                         <Button
                           variant="outline"
                           size="icon"
+                          disabled={isGeneratingAiPreview}
                           className="h-12 w-12 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
-                          onClick={() => setRoundCount((prev) => Math.max(1, prev - 1))}
+                          onClick={() => {
+                            if (isGeneratingAiPreview) {
+                              return;
+                            }
+                            setRoundCount((prev) => Math.max(1, prev - 1));
+                          }}
                         >
                           -
                         </Button>
@@ -1134,8 +1493,14 @@ export default function CreateFreeGamePage() {
                         <Button
                           variant="outline"
                           size="icon"
+                          disabled={isGeneratingAiPreview}
                           className="h-12 w-12 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
-                          onClick={() => setRoundCount((prev) => prev + 1)}
+                          onClick={() => {
+                            if (isGeneratingAiPreview) {
+                              return;
+                            }
+                            setRoundCount((prev) => prev + 1);
+                          }}
                         >
                           +
                         </Button>
@@ -1179,6 +1544,7 @@ export default function CreateFreeGamePage() {
                     <input
                       type="text"
                       placeholder="이름"
+                      disabled={isAssignmentEditingLocked}
                       className={`h-[50px] w-full rounded-none border-2 bg-slate-50 px-4 text-sm font-medium transition-colors focus:bg-white focus:outline-none ${
                         submitErrorField === "participants"
                           ? "border-red-300 focus:border-red-500"
@@ -1254,6 +1620,7 @@ export default function CreateFreeGamePage() {
                       variant="brutalist"
                       value={newParticipant.gender}
                       options={[...GENDER_SELECT_OPTIONS]}
+                      disabled={isAssignmentEditingLocked}
                       onChange={(event) =>
                         setNewParticipant((prev) => ({
                           ...prev,
@@ -1267,6 +1634,7 @@ export default function CreateFreeGamePage() {
                       variant="brutalist"
                       value={newParticipant.ageGroup}
                       options={AGE_GROUP_SELECT_OPTIONS}
+                      disabled={isAssignmentEditingLocked}
                       onChange={(event) =>
                         setNewParticipant((prev) => ({
                           ...prev,
@@ -1280,6 +1648,7 @@ export default function CreateFreeGamePage() {
                       variant="brutalist"
                       value={newParticipant.level}
                       options={LEVEL_SELECT_OPTIONS}
+                      disabled={isAssignmentEditingLocked}
                       onChange={(event) =>
                         setNewParticipant((prev) => ({
                           ...prev,
@@ -1289,6 +1658,7 @@ export default function CreateFreeGamePage() {
                     />
                   </div>
                   <Button
+                    disabled={isAssignmentEditingLocked}
                     onClick={() => addParticipant()}
                     className="h-[50px] w-full rounded-none bg-slate-900 px-6 text-xs font-bold uppercase tracking-widest text-white hover:bg-slate-800 sm:w-[96px]"
                   >
@@ -1321,6 +1691,7 @@ export default function CreateFreeGamePage() {
                       <Button
                         type="button"
                         variant="outline"
+                        disabled={isAssignmentEditingLocked}
                         className="h-9 rounded-none border-2 border-violet-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100"
                         onClick={() => setPartnerSelectionSourceId(null)}
                       >
@@ -1358,7 +1729,7 @@ export default function CreateFreeGamePage() {
                                 participantRowRefs.current[participant.clientId] = element;
                               }}
                               onClick={() => {
-                                if (isPartnerCandidate) {
+                                if (isPartnerCandidate && !isAssignmentEditingLocked) {
                                   assignPartner(participant.clientId);
                                 }
                               }}
@@ -1368,7 +1739,9 @@ export default function CreateFreeGamePage() {
                                 isPartnerSource
                                   ? "bg-violet-50"
                                   : isPartnerCandidate
-                                    ? "cursor-pointer bg-white hover:bg-violet-50"
+                                    ? isAssignmentEditingLocked
+                                      ? "bg-white"
+                                      : "cursor-pointer bg-white hover:bg-violet-50"
                                     : "hover:bg-slate-50"
                               }`}
                             >
@@ -1422,7 +1795,8 @@ export default function CreateFreeGamePage() {
                                     <div className="flex shrink-0 items-center gap-1">
                                       <button
                                         type="button"
-                                        className="border border-violet-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100"
+                                        disabled={isAssignmentEditingLocked}
+                                        className="border border-violet-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                                         onClick={(event) => {
                                           event.stopPropagation();
                                           startPartnerSelection(participant.clientId);
@@ -1432,7 +1806,8 @@ export default function CreateFreeGamePage() {
                                       </button>
                                       <button
                                         type="button"
-                                        className="border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-500"
+                                        disabled={isAssignmentEditingLocked}
+                                        className="border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                                         onClick={(event) => {
                                           event.stopPropagation();
                                           clearPartner(participant.clientId);
@@ -1446,6 +1821,7 @@ export default function CreateFreeGamePage() {
                                   <Button
                                     type="button"
                                     variant="outline"
+                                    disabled={isAssignmentEditingLocked}
                                     className="h-9 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700"
                                     onClick={(event) => {
                                       event.stopPropagation();
@@ -1460,6 +1836,7 @@ export default function CreateFreeGamePage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
+                                  disabled={isAssignmentEditingLocked}
                                   className="h-8 w-8 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
                                   onClick={(event) => {
                                     event.stopPropagation();
@@ -1517,8 +1894,13 @@ export default function CreateFreeGamePage() {
                               <button
                                 type="button"
                                 aria-label={`${item.label}: ${item.value}`}
+                                disabled={isAssignmentEditingLocked}
                                 onClick={item.onClick ?? undefined}
-                                className={`flex h-9 w-9 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors ${item.className}`}
+                                className={`flex h-9 w-9 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors ${
+                                  isAssignmentEditingLocked
+                                    ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 shadow-none"
+                                    : item.className
+                                }`}
                               >
                                 <Icon className="h-4 w-4" />
                               </button>
@@ -1536,10 +1918,16 @@ export default function CreateFreeGamePage() {
                     <Button
                       type="button"
                       size="sm"
+                      disabled={isGeneratingAiPreview}
+                      onClick={() => void handleGenerateAiPreview()}
                       className="rounded-none bg-emerald-500 font-mono text-[10px] uppercase tracking-widest text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-emerald-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none"
                     >
-                      <Activity className="mr-2 h-3 w-3" />
-                      AI 자동 배정
+                      {isGeneratingAiPreview ? (
+                        <LoaderCircle className="mr-2 h-3 w-3 animate-spin" />
+                      ) : (
+                        <Activity className="mr-2 h-3 w-3" />
+                      )}
+                      {isGeneratingAiPreview ? "AI 배정 중..." : "AI 자동 배정"}
                     </Button>
                   </div>
                 </div>
@@ -1621,6 +2009,7 @@ export default function CreateFreeGamePage() {
                           <Button
                             variant="outline"
                             size="sm"
+                            disabled={isAssignmentEditingLocked}
                             className="h-6 rounded-none border border-slate-300 text-[10px] font-bold uppercase tracking-widest"
                             onClick={() => addCourtToRound(round.id)}
                           >
@@ -1629,6 +2018,7 @@ export default function CreateFreeGamePage() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            disabled={isAssignmentEditingLocked}
                             className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
                             onClick={() => removeRoundBlock(round.id)}
                           >
@@ -1657,6 +2047,7 @@ export default function CreateFreeGamePage() {
                                   <Button
                                     variant="ghost"
                                     size="icon"
+                                    disabled={isAssignmentEditingLocked}
                                     className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
                                     onClick={() => removeCourtFromRound(round.id, court.id)}
                                   >
@@ -1667,6 +2058,7 @@ export default function CreateFreeGamePage() {
                                   court={court}
                                   roundId={round.id}
                                   assignmentTarget={assignmentTarget}
+                                  isLocked={isAssignmentEditingLocked}
                                   selectAssignmentTarget={selectAssignmentTarget}
                                 />
                               </div>
@@ -1754,6 +2146,7 @@ export default function CreateFreeGamePage() {
                 <Button
                   type="button"
                   variant="outline"
+                  disabled={isAssignmentEditingLocked}
                   onClick={addRoundBlock}
                   className="h-12 w-full rounded-none border-2 border-slate-900 bg-white font-bold uppercase tracking-widest text-slate-900 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-slate-50 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:w-[200px]"
                 >
@@ -1762,7 +2155,7 @@ export default function CreateFreeGamePage() {
               ) : null}
               <Button
                 onClick={() => void handleNext()}
-                disabled={isSubmitting}
+                disabled={isSubmitting || (step === 3 && isGeneratingAiPreview)}
                 className="h-12 w-full rounded-none bg-teal-500 font-bold uppercase tracking-widest text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-teal-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:w-[200px]"
               >
                 {nextButtonLabel}
@@ -1929,6 +2322,7 @@ export default function CreateFreeGamePage() {
                   type="button"
                   variant="outline"
                   size="icon"
+                  disabled={isAssignmentEditingLocked}
                   className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
                   onClick={closeParticipantAssignModal}
                 >
@@ -1941,7 +2335,8 @@ export default function CreateFreeGamePage() {
                   <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                     {participants.map((participant) => {
                       const assignmentConflict = getParticipantAssignmentConflict(participant);
-                      const isDisabled = assignmentConflict !== null;
+                      const isDisabled =
+                        isAssignmentEditingLocked || assignmentConflict !== null;
 
                       return (
                         <button

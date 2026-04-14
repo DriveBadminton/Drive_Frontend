@@ -1,7 +1,7 @@
 "use client";
 
 import { apiRequest, isApiError } from "./api";
-import { UiGameGrade, toBackendGrade, toUiGameGrade } from "./grade";
+import { type BackendGrade, type UiGameGrade, toBackendGrade, toUiGameGrade } from "./grade";
 
 export type Gender = "MALE" | "FEMALE";
 export type Grade = UiGameGrade;
@@ -115,6 +115,82 @@ export interface ScheduleDraftRound {
     teamAIds: [string | null, string | null];
     teamBIds: [string | null, string | null];
   }>;
+}
+
+export type AssignmentPreviewPartnerPolicy =
+  | "PREFER_PARTNERS"
+  | "IGNORE_PARTNERS";
+export type AssignmentPreviewExistingAssignmentPolicy =
+  | "FILL_EMPTY_SLOTS"
+  | "REASSIGN_ALL";
+export type AssignmentPreviewSlot = [
+  string | null,
+  string | null,
+  string | null,
+  string | null,
+];
+
+export interface AssignmentPreviewCourt {
+  courtNumber: number;
+  slots: AssignmentPreviewSlot;
+}
+
+export interface AssignmentPreviewRound {
+  roundNumber: number;
+  courts: AssignmentPreviewCourt[];
+}
+
+export interface CreateGameAssignmentPreviewRequest {
+  participants: Array<{
+    clientId: string;
+    name: string;
+    gender: Gender;
+    ageGroup: AgeGroup;
+    grade: BackendGrade;
+    gamesAssigned: number;
+  }>;
+  rounds: AssignmentPreviewRound[];
+  partnerPairs: Array<{
+    participantId1: string;
+    participantId2: string;
+  }>;
+  preferences: {
+    partnerPolicy: AssignmentPreviewPartnerPolicy;
+    existingAssignmentPolicy: AssignmentPreviewExistingAssignmentPolicy;
+  };
+}
+
+export interface CreateGameAssignmentPreviewResponse {
+  rounds: AssignmentPreviewRound[];
+  warnings: Array<{
+    code: string;
+    message: string;
+  }>;
+}
+
+export type AssignmentPreviewJobStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED";
+
+export interface CreateGameAssignmentPreviewJobResponse {
+  jobId: string;
+  status: "QUEUED";
+  pollAfterMs: number;
+}
+
+export interface GetGameAssignmentPreviewJobResponse {
+  jobId: string;
+  status: AssignmentPreviewJobStatus;
+  preview: CreateGameAssignmentPreviewResponse | null;
+  failure: {
+    code: string;
+    message: string;
+  } | null;
+  submittedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
 }
 
 interface CreateFreeGameResponse {
@@ -257,6 +333,31 @@ export async function createFreeGame(
   });
 
   return { gameId: response.gameId };
+}
+
+export async function createFreeGameAssignmentPreview(
+  request: CreateGameAssignmentPreviewRequest
+): Promise<CreateGameAssignmentPreviewJobResponse> {
+  return apiRequest<CreateGameAssignmentPreviewJobResponse>(
+    "/free-games/assignment-previews",
+    {
+      method: "POST",
+      auth: true,
+      body: request,
+    }
+  );
+}
+
+export async function getFreeGameAssignmentPreviewJob(
+  jobId: string
+): Promise<GetGameAssignmentPreviewJobResponse> {
+  return apiRequest<GetGameAssignmentPreviewJobResponse>(
+    `/free-games/assignment-previews/${jobId}`,
+    {
+      method: "GET",
+      auth: true,
+    }
+  );
 }
 
 export async function getGameById(gameId: string): Promise<Game | null> {

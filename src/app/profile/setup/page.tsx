@@ -50,6 +50,7 @@ export default function ProfileSetupPage() {
   const [districts, setDistricts] = useState<District[]>([]);
   const [isLoadingDistricts, setIsLoadingDistricts] = useState(false);
   const [completionRedirect, setCompletionRedirect] = useState("/profile");
+  const [isCompletingSetup, setIsCompletingSetup] = useState(false);
 
   const handleProvinceChange = (provinceId: string) => {
     setDistricts([]);
@@ -80,9 +81,9 @@ export default function ProfileSetupPage() {
 
   useEffect(() => {
     if (!isLoading && user?.status === "ACTIVE") {
-      router.replace("/profile");
+      router.replace(isCompletingSetup ? completionRedirect : "/profile");
     }
-  }, [isLoading, router, user]);
+  }, [completionRedirect, isCompletingSetup, isLoading, router, user]);
 
   useEffect(() => {
     if (!isLoading && isLoggedIn) {
@@ -173,6 +174,7 @@ export default function ProfileSetupPage() {
       return;
     }
 
+    setIsCompletingSetup(true);
     await refetch();
     router.replace(completionRedirect);
   };

@@ -1,6 +1,11 @@
 "use client";
 
-import { authRequest, apiRequest, isApiError } from "./api";
+import {
+  authRequest,
+  apiRequest,
+  getUserFacingErrorMessage,
+  isApiError,
+} from "./api";
 import { BackendGrade, toBackendGrade } from "./grade";
 
 const isDev = process.env.NODE_ENV === "development";
@@ -103,15 +108,7 @@ function debugLog(...args: unknown[]) {
 }
 
 function toFriendlyError(error: unknown, fallback: string) {
-  if (isApiError(error)) {
-    return error.message;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return fallback;
+  return getUserFacingErrorMessage(error, fallback);
 }
 
 export async function createIdentitySession(input: {

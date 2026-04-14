@@ -23,6 +23,40 @@ export class ApiError extends Error {
   }
 }
 
+export function getUserFacingErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+function getDefaultErrorMessage(status: number) {
+  switch (status) {
+    case 400:
+      return "요청 내용을 다시 확인해주세요.";
+    case 401:
+      return "로그인 상태가 만료되었어요. 다시 로그인 후 시도해주세요.";
+    case 403:
+      return "이 작업을 수행할 권한이 없어요.";
+    case 404:
+      return "요청한 정보를 찾을 수 없어요.";
+    case 409:
+      return "현재 상태와 충돌해 요청을 처리하지 못했어요.";
+    case 422:
+      return "입력한 내용을 다시 확인해주세요.";
+    case 429:
+      return "요청이 많아요. 잠시 후 다시 시도해주세요.";
+    case 500:
+    case 502:
+    case 503:
+    case 504:
+      return "일시적인 서버 문제로 요청을 처리하지 못했어요. 잠시 후 다시 시도해주세요.";
+    default:
+      return "요청을 처리하지 못했어요. 잠시 후 다시 시도해주세요.";
+  }
+}
+
 type ParseMode = "json" | "text" | "void";
 
 interface ApiRequestOptions extends Omit<RequestInit, "body"> {
@@ -70,10 +104,13 @@ async function parseProblemDetail(response: Response) {
   }
 }
 
-async function toApiError(response: Response, fallback: string) {
+async function toApiError(response: Response, fallback?: string) {
   const problem = await parseProblemDetail(response);
   const message =
-    problem?.detail || problem?.title || fallback || `요청에 실패했습니다. (${response.status})`;
+    problem?.detail ||
+    problem?.title ||
+    fallback ||
+    getDefaultErrorMessage(response.status);
 
   return new ApiError(message, response.status, problem);
 }
@@ -130,7 +167,7 @@ export async function authRequest<T = void>(
   const response = await executeRequestToBaseUrl(AUTH_URL, path, options);
 
   if (!response.ok) {
-    throw await toApiError(response, `요청에 실패했습니다. (${response.status})`);
+    throw await toApiError(response);
   }
 
   if (parseAs === "void" || response.status === 204) {
@@ -176,7 +213,7 @@ export async function apiRequest<T = void>(
   }
 
   if (!response.ok) {
-    throw await toApiError(response, `요청에 실패했습니다. (${response.status})`);
+    throw await toApiError(response);
   }
 
   if (parseAs === "void" || response.status === 204) {

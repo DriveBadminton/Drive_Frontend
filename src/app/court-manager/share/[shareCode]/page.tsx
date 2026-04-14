@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { ChevronLeft, Copy, Lock } from "lucide-react";
 import PageShell from "@/components/layout/PageShell";
 import { Button } from "@/components/ui/button";
+import { getUserFacingErrorMessage } from "@/lib/api";
 import {
   PublicGameSummary,
   getGameStatusLabel,
@@ -52,9 +53,7 @@ export default function PublicCourtManagerSharePage() {
       } catch (error) {
         if (!cancelled) {
           setPageError(
-            error instanceof Error
-              ? error.message
-              : "공유 세션을 불러오지 못했습니다."
+            getUserFacingErrorMessage(error, "공유 세션을 불러오지 못했습니다.")
           );
         }
       } finally {
