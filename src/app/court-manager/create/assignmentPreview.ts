@@ -56,7 +56,6 @@ export function buildAssignmentPreviewRequest({
   return {
     participants: participants.map((participant) => ({
       clientId: participant.clientId,
-      name: participant.name,
       gender: participant.gender === "M" ? "MALE" : "FEMALE",
       ageGroup: Number(
         participant.ageGroup.replace("s", "")

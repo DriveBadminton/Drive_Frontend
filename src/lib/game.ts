@@ -143,7 +143,6 @@ export interface AssignmentPreviewRound {
 export interface CreateGameAssignmentPreviewRequest {
   participants: Array<{
     clientId: string;
-    name: string;
     gender: Gender;
     ageGroup: AgeGroup;
     grade: BackendGrade;
