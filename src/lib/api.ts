@@ -2,6 +2,7 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.rallyon.test";
 const AUTH_URL = process.env.NEXT_PUBLIC_AUTH_URL || "https://auth.rallyon.test";
+export const AUTH_EXPIRED_EVENT = "rallyon:auth-expired";
 
 export interface ProblemDetail {
   type?: string;
@@ -131,6 +132,14 @@ async function refreshSession() {
   }
 }
 
+function notifyAuthExpired() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+}
+
 async function executeRequest(path: string, options: ApiRequestOptions) {
   return executeRequestToBaseUrl(API_URL, path, options);
 }
@@ -213,6 +222,10 @@ export async function apiRequest<T = void>(
   }
 
   if (!response.ok) {
+    if (auth && response.status === 401) {
+      notifyAuthExpired();
+    }
+
     throw await toApiError(response);
   }
 
