@@ -98,6 +98,8 @@ const AI_PREVIEW_POLLING_RETRY_MESSAGE =
   "자동 배정 상태를 다시 확인하는 중이에요. 결과가 확인될 때까지 편집은 잠시 잠겨 있어요.";
 const AI_PREVIEW_GENERIC_FAILURE_MESSAGE =
   "자동 배정을 완료하지 못했어요. 잠시 후 다시 시도해주세요.";
+const AI_PREVIEW_REASSIGN_ALL_NO_CHANGES_MESSAGE =
+  "전체 다시 배정을 요청했지만 결과가 기존 배정과 동일합니다. 다시 시도하거나 조건을 조정해주세요.";
 const AI_PREVIEW_POLL_RETRY_DELAY_MS = 1000;
 const AI_PREVIEW_POLL_DEGRADED_DELAY_MS = 5000;
 const AI_PREVIEW_POLL_DEGRADED_THRESHOLD = 3;
@@ -283,6 +285,14 @@ function hasAssignmentChanges(currentRounds: LocalRound[], nextRounds: LocalRoun
   );
 }
 
+function hasAssignedParticipants(rounds: LocalRound[]) {
+  return rounds.some((round) =>
+    round.courts.some((court) =>
+      court.assignedParticipants.some((participant) => participant !== null)
+    )
+  );
+}
+
 function getAiPreviewSummaryMessage(
   warnings: CreateGameAssignmentPreviewResponse["warnings"]
 ) {
@@ -403,19 +413,21 @@ export default function CreateFreeGamePage() {
   const [submitError, setSubmitError] = useState("");
   const [submitErrorField, setSubmitErrorField] = useState<StepValidationField>(null);
   const [partnerLinks, setPartnerLinks] = useState<PartnerLinks>({});
-  const [partnerSelectionSourceId, setPartnerSelectionSourceId] = useState<string | null>(null);
+  const [partnerSelectionSourceId, setPartnerSelectionSourceId] = useState<number | null>(null);
   const [aiPartnerPolicy, setAiPartnerPolicy] =
     useState<AiPartnerPolicy>(DEFAULT_AI_PARTNER_POLICY);
   const [aiExistingAssignmentPolicy, setAiExistingAssignmentPolicy] =
     useState<AiExistingAssignmentPolicy>(DEFAULT_AI_EXISTING_ASSIGNMENT_POLICY);
   const [isGeneratingAiPreview, setIsGeneratingAiPreview] = useState(false);
-  const [lastAddedParticipantId, setLastAddedParticipantId] = useState<string | null>(null);
+  const [isParticipantSummaryCollapsed, setIsParticipantSummaryCollapsed] = useState(true);
+  const [lastAddedParticipantId, setLastAddedParticipantId] = useState<number | null>(null);
   const isAssignmentEditingLocked = isGeneratingAiPreview;
   const isParticipantNameComposingRef = useRef(false);
   const submitParticipantAfterCompositionRef = useRef(false);
   const skipNextParticipantEnterRef = useRef(false);
   const participantListRef = useRef<HTMLDivElement | null>(null);
-  const participantRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const participantRowRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const nextParticipantIdRef = useRef(1);
   const activePreviewJobIdRef = useRef<string | null>(null);
   const previewPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewPollFailureCountRef = useRef(0);
@@ -440,6 +452,16 @@ export default function CreateFreeGamePage() {
   }, [participants]);
 
   useEffect(() => {
+    const nextParticipantId =
+      participants.reduce(
+        (maxParticipantId, participant) =>
+          Math.max(maxParticipantId, participant.participantId),
+        0
+      ) + 1;
+    nextParticipantIdRef.current = nextParticipantId;
+  }, [participants]);
+
+  useEffect(() => {
     partnerLinksRef.current = partnerLinks;
   }, [partnerLinks]);
 
@@ -460,7 +482,7 @@ export default function CreateFreeGamePage() {
   }, []);
 
   useEffect(() => {
-    if (!lastAddedParticipantId) {
+    if (lastAddedParticipantId === null) {
       return;
     }
 
@@ -588,6 +610,7 @@ export default function CreateFreeGamePage() {
   const schedulePreviewJobPoll = (
     jobId: string,
     submittedRequestKey: string,
+    submittedExistingAssignmentPolicy: AiExistingAssignmentPolicy,
     delayMs = 1000
   ) => {
     if (previewPollTimeoutRef.current) {
@@ -595,11 +618,15 @@ export default function CreateFreeGamePage() {
     }
 
     previewPollTimeoutRef.current = setTimeout(() => {
-      void pollPreviewJob(jobId, submittedRequestKey);
+      void pollPreviewJob(jobId, submittedRequestKey, submittedExistingAssignmentPolicy);
     }, delayMs);
   };
 
-  const pollPreviewJob = async (jobId: string, submittedRequestKey: string) => {
+  const pollPreviewJob = async (
+    jobId: string,
+    submittedRequestKey: string,
+    submittedExistingAssignmentPolicy: AiExistingAssignmentPolicy
+  ) => {
     previewPollTimeoutRef.current = null;
 
     try {
@@ -609,7 +636,12 @@ export default function CreateFreeGamePage() {
       setSubmitErrorField(null);
 
       if (job.status === "QUEUED" || job.status === "RUNNING") {
-        schedulePreviewJobPoll(jobId, submittedRequestKey, AI_PREVIEW_POLL_RETRY_DELAY_MS);
+        schedulePreviewJobPoll(
+          jobId,
+          submittedRequestKey,
+          submittedExistingAssignmentPolicy,
+          AI_PREVIEW_POLL_RETRY_DELAY_MS
+        );
         return;
       }
 
@@ -656,7 +688,9 @@ export default function CreateFreeGamePage() {
       setIsParticipantAssignModalOpen(false);
       setAssignmentTarget(null);
       setSubmitError(
-        !hasChanges && preview.warnings.length > 0
+        !hasChanges && submittedExistingAssignmentPolicy === "reassign-all"
+          ? AI_PREVIEW_REASSIGN_ALL_NO_CHANGES_MESSAGE
+          : !hasChanges && preview.warnings.length > 0
           ? getAiPreviewSummaryMessage(preview.warnings)
           : ""
       );
@@ -686,12 +720,18 @@ export default function CreateFreeGamePage() {
         schedulePreviewJobPoll(
           jobId,
           submittedRequestKey,
+          submittedExistingAssignmentPolicy,
           AI_PREVIEW_POLL_DEGRADED_DELAY_MS
         );
         return;
       }
 
-      schedulePreviewJobPoll(jobId, submittedRequestKey, AI_PREVIEW_POLL_RETRY_DELAY_MS);
+      schedulePreviewJobPoll(
+        jobId,
+        submittedRequestKey,
+        submittedExistingAssignmentPolicy,
+        AI_PREVIEW_POLL_RETRY_DELAY_MS
+      );
     }
   };
 
@@ -728,7 +768,12 @@ export default function CreateFreeGamePage() {
       submittedJobId = job.jobId;
 
       activePreviewJobIdRef.current = job.jobId;
-      schedulePreviewJobPoll(job.jobId, requestKey, job.pollAfterMs);
+      schedulePreviewJobPoll(
+        job.jobId,
+        requestKey,
+        aiExistingAssignmentPolicy,
+        job.pollAfterMs
+      );
     } catch (error) {
       if (error instanceof AssignmentPreviewContractError) {
         setSubmitError(error.message);
@@ -765,7 +810,7 @@ export default function CreateFreeGamePage() {
     }
 
     const existsInSameCourt = targetCourt.assignedParticipants.some(
-      (current) => current?.clientId === participant.clientId
+      (current) => current?.participantId === participant.participantId
     );
     if (existsInSameCourt) {
       return "같은 코트";
@@ -773,7 +818,7 @@ export default function CreateFreeGamePage() {
 
     const existsInSameRound = targetRound.courts.some((court) =>
       court.assignedParticipants.some(
-        (current) => current?.clientId === participant.clientId
+        (current) => current?.participantId === participant.participantId
       )
     );
     if (existsInSameRound) {
@@ -857,6 +902,34 @@ export default function CreateFreeGamePage() {
     }
   };
 
+  const handleClearAllAssignments = () => {
+    if (isAssignmentEditingLocked || !hasAssignedParticipants(rounds)) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "현재 코트 배정을 모두 초기화할까요? 참가자, 파트너, 라운드, 코트 구성은 유지됩니다."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const clearedRounds = rounds.map((round) => ({
+      ...round,
+      courts: round.courts.map((court) => ({
+        ...court,
+        assignedParticipants: Array.from({ length: court.assignedParticipants.length }, () => null),
+      })),
+    }));
+
+    setSubmitError("");
+    setSubmitErrorField(null);
+    setRounds(clearedRounds);
+    setParticipants((prev) => recalculateAssignments(prev, clearedRounds));
+    setIsParticipantAssignModalOpen(false);
+    setAssignmentTarget(null);
+  };
+
   const addParticipant = (participantName = newParticipant.name) => {
     if (isAssignmentEditingLocked) {
       return;
@@ -877,7 +950,7 @@ export default function CreateFreeGamePage() {
     skipNextParticipantEnterRef.current = false;
 
     const nextParticipant: LocalParticipant = {
-      clientId: crypto.randomUUID(),
+      participantId: nextParticipantIdRef.current++,
       name: trimmedParticipantName,
       gender: newParticipant.gender,
       ageGroup: newParticipant.ageGroup,
@@ -885,7 +958,7 @@ export default function CreateFreeGamePage() {
       gamesAssigned: 0,
     };
 
-    setLastAddedParticipantId(nextParticipant.clientId);
+    setLastAddedParticipantId(nextParticipant.participantId);
     setParticipants((prev) => [...prev, nextParticipant]);
     setNewParticipant({
       name: "",
@@ -895,39 +968,39 @@ export default function CreateFreeGamePage() {
     });
   };
 
-  const startPartnerSelection = (participantClientId: string) => {
+  const startPartnerSelection = (participantId: number) => {
     if (isAssignmentEditingLocked) {
       return;
     }
 
     setPartnerSelectionSourceId((current) =>
-      current === participantClientId ? null : participantClientId
+      current === participantId ? null : participantId
     );
   };
 
-  const assignPartner = (participantClientId: string) => {
+  const assignPartner = (participantId: number) => {
     if (isAssignmentEditingLocked) {
       return;
     }
 
-    if (!partnerSelectionSourceId || partnerSelectionSourceId === participantClientId) {
+    if (partnerSelectionSourceId === null || partnerSelectionSourceId === participantId) {
       return;
     }
 
     setPartnerLinks((current) =>
-      connectPartnerLinks(current, partnerSelectionSourceId, participantClientId)
+      connectPartnerLinks(current, partnerSelectionSourceId, participantId)
     );
     setPartnerSelectionSourceId(null);
   };
 
-  const clearPartner = (participantClientId: string) => {
+  const clearPartner = (participantId: number) => {
     if (isAssignmentEditingLocked) {
       return;
     }
 
-    setPartnerLinks((current) => detachPartnerLinks(current, participantClientId));
+    setPartnerLinks((current) => detachPartnerLinks(current, participantId));
     setPartnerSelectionSourceId((current) =>
-      current === participantClientId ? null : current
+      current === participantId ? null : current
     );
   };
 
@@ -975,7 +1048,7 @@ export default function CreateFreeGamePage() {
     setIsLocationModalOpen(false);
   };
 
-  const removeParticipant = (participantClientId: string) => {
+  const removeParticipant = (participantId: number) => {
     if (isAssignmentEditingLocked) {
       return;
     }
@@ -985,18 +1058,18 @@ export default function CreateFreeGamePage() {
       courts: round.courts.map((court) => ({
         ...court,
         assignedParticipants: court.assignedParticipants.map((participant) =>
-          participant?.clientId === participantClientId ? null : participant
+          participant?.participantId === participantId ? null : participant
         ),
       })),
     }));
     const nextParticipants = participants.filter(
-      (participant) => participant.clientId !== participantClientId
+      (participant) => participant.participantId !== participantId
     );
     setRounds(nextRounds);
     setParticipants(recalculateAssignments(nextParticipants, nextRounds));
-    setPartnerLinks((current) => detachPartnerLinks(current, participantClientId));
+    setPartnerLinks((current) => detachPartnerLinks(current, participantId));
     setPartnerSelectionSourceId((current) =>
-      current === participantClientId ? null : current
+      current === participantId ? null : current
     );
   };
 
@@ -1036,7 +1109,7 @@ export default function CreateFreeGamePage() {
           scheduledAt: date,
           location: trimmedLocation,
           participants: participants.map((participant) => ({
-            clientId: participant.clientId,
+            participantId: participant.participantId,
             originalName: participant.name,
             gender: participant.gender === "M" ? "MALE" : "FEMALE",
             grade: participant.level,
@@ -1047,8 +1120,8 @@ export default function CreateFreeGamePage() {
             courts: round.courts.map((court, courtIndex) => ({
               courtNumber: courtIndex + 1,
               slots: court.assignedParticipants.map((participant) =>
-                participant?.clientId ?? null
-              ) as [string | null, string | null, string | null, string | null],
+                participant?.participantId ?? null
+              ) as [number | null, number | null, number | null, number | null],
             })),
           })),
         });
@@ -1182,13 +1255,17 @@ export default function CreateFreeGamePage() {
       })()
     : null;
   const participantById = new Map(
-    participants.map((participant) => [participant.clientId, participant])
+    participants.map((participant) => [participant.participantId, participant])
   );
-  const partnerSelectionSource = partnerSelectionSourceId
+  const partnerSelectionSource = partnerSelectionSourceId !== null
     ? participantById.get(partnerSelectionSourceId) ?? null
     : null;
   const participantSummaryGroups = buildParticipantSummaryGroups(participants, partnerLinks);
   const hasPartnerPairs = participantSummaryGroups.some((group) => group.type === "pair");
+  const partnerPairCount = participantSummaryGroups.filter((group) => group.type === "pair").length;
+  const participantSummaryMeta = hasPartnerPairs
+    ? `${participants.length}명 · 파트너 ${partnerPairCount}쌍`
+    : `${participants.length}명`;
   const aiAssignmentIndicators = [
     !hasPartnerPairs
       ? {
@@ -1264,6 +1341,7 @@ export default function CreateFreeGamePage() {
             "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-400 hover:bg-white",
         },
   ];
+  const canClearAllAssignments = !isGeneratingAiPreview && hasAssignedParticipants(rounds);
 
   return (
     <div className="container mx-auto max-w-5xl px-4 py-8 md:px-8 lg:py-12">
@@ -1920,6 +1998,17 @@ export default function CreateFreeGamePage() {
                     <Button
                       type="button"
                       size="sm"
+                      variant="outline"
+                      disabled={!canClearAllAssignments}
+                      onClick={handleClearAllAssignments}
+                      className="rounded-none border-2 border-slate-300 bg-white font-mono text-[10px] uppercase tracking-widest text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      <X className="mr-2 h-3 w-3" />
+                      전체 배정 초기화
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
                       disabled={isGeneratingAiPreview}
                       onClick={() => void handleGenerateAiPreview()}
                       className="rounded-none bg-emerald-500 font-mono text-[10px] uppercase tracking-widest text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-emerald-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none"
@@ -1936,62 +2025,97 @@ export default function CreateFreeGamePage() {
 
                 <div className="space-y-6">
                   <div className="border-2 border-slate-200 bg-slate-50 p-4">
-                    <div className="mb-3">
-                      <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                        참가자 요약
-                      </h3>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      {participantSummaryGroups.map((group) =>
-                        group.type === "pair" ? (
-                          <div key={group.key} className="relative xl:col-span-2">
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              {group.participants.map((participant) => (
-                                <div
-                                  key={participant.participantId}
-                                  className="flex items-center justify-between border-2 border-violet-400 bg-violet-50/20 p-3 text-left text-xs"
-                                >
-                                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                                    <span className="truncate font-bold text-slate-900">
-                                      {participant.name}
-                                    </span>
-                                    <span className="shrink-0 font-mono text-slate-500">
-                                      {getGenderLabel(participant.gender)}/
-                                      {getAgeGroupLabel(participant.ageGroup)}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setIsParticipantSummaryCollapsed((current) => !current)
+                      }
+                      className="flex w-full items-center justify-between gap-3 text-left"
+                      aria-expanded={!isParticipantSummaryCollapsed}
+                    >
+                      <div>
+                        <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                          참가자 요약
+                        </h3>
+                        <p className="mt-1 text-xs font-mono text-slate-500">
+                          {participantSummaryMeta}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                        <span>{isParticipantSummaryCollapsed ? "펼치기" : "접기"}</span>
+                        <ChevronRight
+                          className={`h-4 w-4 transition-transform ${
+                            isParticipantSummaryCollapsed ? "" : "rotate-90"
+                          }`}
+                        />
+                      </div>
+                    </button>
+
+                    <AnimatePresence initial={false}>
+                      {!isParticipantSummaryCollapsed && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.18, ease: "easeOut" }}
+                          className="overflow-hidden"
+                        >
+                          <div className="mt-3 border-t border-slate-200 pt-3">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                              {participantSummaryGroups.map((group) =>
+                                group.type === "pair" ? (
+                                  <div key={group.key} className="relative xl:col-span-2">
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                      {group.participants.map((participant) => (
+                                        <div
+                                          key={participant.participantId}
+                                          className="flex items-center justify-between border-2 border-violet-400 bg-violet-50/20 p-3 text-left text-xs"
+                                        >
+                                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                                            <span className="truncate font-bold text-slate-900">
+                                              {participant.name}
+                                            </span>
+                                            <span className="shrink-0 font-mono text-slate-500">
+                                              {getGenderLabel(participant.gender)}/
+                                              {getAgeGroupLabel(participant.ageGroup)}
+                                            </span>
+                                          </div>
+                                          <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
+                                            게임 수 {participant.gamesAssigned}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="pointer-events-none absolute top-1/2 left-1/2 hidden h-[3px] w-4 -translate-x-1/2 -translate-y-1/2 bg-violet-500 sm:block" />
+                                    <div className="mt-2 flex items-center justify-center sm:hidden">
+                                      <div className="h-[3px] w-4 bg-violet-500" />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div
+                                    key={group.key}
+                                    className="flex items-center justify-between border border-slate-200 bg-white p-3 text-left text-xs"
+                                  >
+                                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                                      <span className="truncate font-bold text-slate-900">
+                                        {group.participant.name}
+                                      </span>
+                                      <span className="shrink-0 font-mono text-slate-500">
+                                        {getGenderLabel(group.participant.gender)}/
+                                        {getAgeGroupLabel(group.participant.ageGroup)}
+                                      </span>
+                                    </div>
+                                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
+                                      게임 수 {group.participant.gamesAssigned}
                                     </span>
                                   </div>
-                                  <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
-                                    게임 수 {participant.gamesAssigned}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                            <div className="pointer-events-none absolute top-1/2 left-1/2 hidden h-[3px] w-4 -translate-x-1/2 -translate-y-1/2 bg-violet-500 sm:block" />
-                            <div className="mt-2 flex items-center justify-center sm:hidden">
-                              <div className="h-[3px] w-4 bg-violet-500" />
+                                )
+                              )}
                             </div>
                           </div>
-                        ) : (
-                          <div
-                            key={group.key}
-                            className="flex items-center justify-between border border-slate-200 bg-white p-3 text-left text-xs"
-                          >
-                            <div className="flex min-w-0 flex-1 items-center gap-2">
-                              <span className="truncate font-bold text-slate-900">
-                                {group.participant.name}
-                              </span>
-                              <span className="shrink-0 font-mono text-slate-500">
-                                {getGenderLabel(group.participant.gender)}/
-                                {getAgeGroupLabel(group.participant.ageGroup)}
-                              </span>
-                            </div>
-                            <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
-                              게임 수 {group.participant.gamesAssigned}
-                            </span>
-                          </div>
-                        )
+                        </motion.div>
                       )}
-                    </div>
+                    </AnimatePresence>
                   </div>
 
                   {rounds.length === 0 ? (

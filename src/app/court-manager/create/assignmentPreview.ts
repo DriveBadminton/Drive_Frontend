@@ -29,6 +29,7 @@ type PreviewRound = {
 type PreviewPartnerLinks = Record<number, number>;
 type PreviewPartnerPolicy = "prefer-partners" | "ignore-partners";
 type PreviewExistingAssignmentPolicy = "fill-empty-slots" | "reassign-all";
+const EMPTY_ASSIGNMENT_PREVIEW_SLOT: AssignmentPreviewSlot = [null, null, null, null];
 
 const ASSIGNMENT_PREVIEW_CONTRACT_ERROR_MESSAGE =
   "자동 배정 결과를 적용할 수 없어요. 현재 배정은 유지했어요. 잠시 후 다시 시도해주세요.";
@@ -53,6 +54,8 @@ export function buildAssignmentPreviewRequest({
   partnerPolicy: PreviewPartnerPolicy;
   existingAssignmentPolicy: PreviewExistingAssignmentPolicy;
 }): CreateGameAssignmentPreviewRequest {
+  const shouldReassignAll = existingAssignmentPolicy === "reassign-all";
+
   return {
     participants: participants.map((participant) => ({
       participantId: participant.participantId,
@@ -67,9 +70,11 @@ export function buildAssignmentPreviewRequest({
       roundNumber: roundIndex + 1,
       courts: round.courts.map((court, courtIndex) => ({
         courtNumber: courtIndex + 1,
-        slots: toAssignmentPreviewSlot(
-          court.assignedParticipants.map((participant) => participant?.participantId ?? null)
-        ),
+        slots: shouldReassignAll
+          ? EMPTY_ASSIGNMENT_PREVIEW_SLOT
+          : toAssignmentPreviewSlot(
+              court.assignedParticipants.map((participant) => participant?.participantId ?? null)
+            ),
       })),
     })),
     partnerPairs: buildPartnerPairs(partnerLinks),
