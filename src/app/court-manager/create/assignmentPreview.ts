@@ -7,7 +7,7 @@ import type {
 import { toBackendGrade } from "@/lib/grade";
 
 type PreviewParticipant = {
-  clientId: string;
+  participantId: number;
   name: string;
   gender: "M" | "F";
   ageGroup: string;
@@ -16,7 +16,7 @@ type PreviewParticipant = {
 };
 
 type PreviewAssignableParticipant = {
-  clientId: string;
+  participantId: number;
 };
 
 type PreviewRound = {
@@ -26,7 +26,7 @@ type PreviewRound = {
   }>;
 };
 
-type PreviewPartnerLinks = Record<string, string>;
+type PreviewPartnerLinks = Record<number, number>;
 type PreviewPartnerPolicy = "prefer-partners" | "ignore-partners";
 type PreviewExistingAssignmentPolicy = "fill-empty-slots" | "reassign-all";
 
@@ -55,7 +55,7 @@ export function buildAssignmentPreviewRequest({
 }): CreateGameAssignmentPreviewRequest {
   return {
     participants: participants.map((participant) => ({
-      clientId: participant.clientId,
+      participantId: participant.participantId,
       gender: participant.gender === "M" ? "MALE" : "FEMALE",
       ageGroup: Number(
         participant.ageGroup.replace("s", "")
@@ -68,7 +68,7 @@ export function buildAssignmentPreviewRequest({
       courts: round.courts.map((court, courtIndex) => ({
         courtNumber: courtIndex + 1,
         slots: toAssignmentPreviewSlot(
-          court.assignedParticipants.map((participant) => participant?.clientId ?? null)
+          court.assignedParticipants.map((participant) => participant?.participantId ?? null)
         ),
       })),
     })),
@@ -116,7 +116,7 @@ export function validateAssignmentPreviewResponse({
     throw new AssignmentPreviewContractError();
   }
 
-  const participantIds = new Set(participants.map((participant) => participant.clientId));
+  const participantIds = new Set(participants.map((participant) => participant.participantId));
 
   for (let roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
     const currentRound = rounds[roundIndex];
@@ -169,7 +169,7 @@ export function applyAssignmentPreviewToRounds<TParticipant extends PreviewAssig
   participants: TParticipant[]
 ) {
   const participantsById = new Map(
-    participants.map((participant) => [participant.clientId, participant] as const)
+    participants.map((participant) => [participant.participantId, participant] as const)
   );
 
   return rounds.map((round, roundIndex) => ({
@@ -178,7 +178,7 @@ export function applyAssignmentPreviewToRounds<TParticipant extends PreviewAssig
       ...court,
       assignedParticipants: previewRounds[roundIndex].courts[courtIndex].slots.map(
         (participantId) =>
-          participantId ? participantsById.get(participantId) ?? null : null
+          participantId !== null ? participantsById.get(participantId) ?? null : null
       ),
     })),
   }));
@@ -188,17 +188,19 @@ function buildPartnerPairs(partnerLinks: PreviewPartnerLinks) {
   const seen = new Set<string>();
 
   return Object.entries(partnerLinks).flatMap(([participantId1, participantId2]) => {
-    const pairKey = [participantId1, participantId2].sort().join(":");
+    const leftParticipantId = Number(participantId1);
+    const rightParticipantId = Number(participantId2);
+    const pairKey = [leftParticipantId, rightParticipantId].sort((left, right) => left - right).join(":");
     if (seen.has(pairKey)) {
       return [];
     }
 
     seen.add(pairKey);
-    return [{ participantId1, participantId2 }];
+    return [{ participantId1: leftParticipantId, participantId2: rightParticipantId }];
   });
 }
 
-function toAssignmentPreviewSlot(values: Array<string | null>): AssignmentPreviewSlot {
+function toAssignmentPreviewSlot(values: Array<number | null>): AssignmentPreviewSlot {
   return [
     values[0] ?? null,
     values[1] ?? null,
@@ -211,7 +213,7 @@ function isAssignmentPreviewSlot(slots: unknown): slots is AssignmentPreviewSlot
   return (
     Array.isArray(slots) &&
     slots.length === 4 &&
-    slots.every((slot) => slot === null || typeof slot === "string")
+    slots.every((slot) => slot === null || typeof slot === "number")
   );
 }
 

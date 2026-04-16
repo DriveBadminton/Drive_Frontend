@@ -70,7 +70,7 @@ export interface PublicGameSummary {
 }
 
 export interface CreateGameParticipant {
-  clientId: string;
+  participantId: number;
   accountId?: string;
   originalName: string;
   gender: Gender;
@@ -82,7 +82,7 @@ export interface CreateGameRound {
   roundNumber: number;
   courts: Array<{
     courtNumber: number;
-    slots: [string | null, string | null, string | null, string | null];
+    slots: [number | null, number | null, number | null, number | null];
   }>;
 }
 
@@ -124,10 +124,10 @@ export type AssignmentPreviewExistingAssignmentPolicy =
   | "FILL_EMPTY_SLOTS"
   | "REASSIGN_ALL";
 export type AssignmentPreviewSlot = [
-  string | null,
-  string | null,
-  string | null,
-  string | null,
+  number | null,
+  number | null,
+  number | null,
+  number | null,
 ];
 
 export interface AssignmentPreviewCourt {
@@ -142,7 +142,7 @@ export interface AssignmentPreviewRound {
 
 export interface CreateGameAssignmentPreviewRequest {
   participants: Array<{
-    clientId: string;
+    participantId: number;
     gender: Gender;
     ageGroup: AgeGroup;
     grade: BackendGrade;
@@ -150,8 +150,8 @@ export interface CreateGameAssignmentPreviewRequest {
   }>;
   rounds: AssignmentPreviewRound[];
   partnerPairs: Array<{
-    participantId1: string;
-    participantId2: string;
+    participantId1: number;
+    participantId2: number;
   }>;
   preferences: {
     partnerPolicy: AssignmentPreviewPartnerPolicy;

@@ -47,7 +47,7 @@ import {
 } from "./assignmentPreview";
 
 type LocalParticipant = {
-  clientId: string;
+  participantId: number;
   name: string;
   gender: "M" | "F";
   ageGroup: string;
@@ -72,7 +72,7 @@ type AssignmentTarget = {
 };
 
 type StepValidationField = "gameName" | "date" | "location" | "participants" | null;
-type PartnerLinks = Record<string, string>;
+type PartnerLinks = Record<number, number>;
 type AiPartnerPolicy = "prefer-partners" | "ignore-partners";
 type AiExistingAssignmentPolicy = "fill-empty-slots" | "reassign-all";
 type ParticipantSummaryGroup =
@@ -170,7 +170,7 @@ function recalculateAssignments(
           (courtTotal, court) =>
             courtTotal +
             court.assignedParticipants.filter(
-              (player) => player?.clientId === participant.clientId
+              (player) => player?.participantId === participant.participantId
             ).length,
           0
         ),
@@ -198,12 +198,12 @@ function getAgeGroupLabel(ageGroup: string) {
   return AGE_GROUP_LABELS[ageGroup as keyof typeof AGE_GROUP_LABELS] ?? ageGroup;
 }
 
-function detachPartnerLinks(partnerLinks: PartnerLinks, participantId: string): PartnerLinks {
+function detachPartnerLinks(partnerLinks: PartnerLinks, participantId: number): PartnerLinks {
   const nextLinks = { ...partnerLinks };
   const partnerId = nextLinks[participantId];
 
   delete nextLinks[participantId];
-  if (partnerId) {
+  if (partnerId !== undefined) {
     delete nextLinks[partnerId];
   }
 
@@ -212,8 +212,8 @@ function detachPartnerLinks(partnerLinks: PartnerLinks, participantId: string): 
 
 function connectPartnerLinks(
   partnerLinks: PartnerLinks,
-  leftParticipantId: string,
-  rightParticipantId: string
+  leftParticipantId: number,
+  rightParticipantId: number
 ): PartnerLinks {
   if (leftParticipantId === rightParticipantId) {
     return partnerLinks;
@@ -233,34 +233,36 @@ function buildParticipantSummaryGroups(
   partnerLinks: PartnerLinks
 ): ParticipantSummaryGroup[] {
   const participantById = new Map(
-    participants.map((participant) => [participant.clientId, participant])
+    participants.map((participant) => [participant.participantId, participant])
   );
-  const visited = new Set<string>();
+  const visited = new Set<number>();
   const groups: ParticipantSummaryGroup[] = [];
 
   for (const participant of participants) {
-    if (visited.has(participant.clientId)) {
+    if (visited.has(participant.participantId)) {
       continue;
     }
 
-    const partnerId = partnerLinks[participant.clientId];
-    const partner = partnerId ? participantById.get(partnerId) : null;
+    const partnerId = partnerLinks[participant.participantId];
+    const partner = partnerId !== undefined ? participantById.get(partnerId) : null;
 
     if (partner) {
-      visited.add(participant.clientId);
-      visited.add(partner.clientId);
+      visited.add(participant.participantId);
+      visited.add(partner.participantId);
       groups.push({
         type: "pair",
-        key: [participant.clientId, partner.clientId].sort().join(":"),
+        key: [participant.participantId, partner.participantId]
+          .sort((left, right) => left - right)
+          .join(":"),
         participants: [participant, partner],
       });
       continue;
     }
 
-    visited.add(participant.clientId);
+    visited.add(participant.participantId);
     groups.push({
       type: "single",
-      key: participant.clientId,
+      key: String(participant.participantId),
       participant,
     });
   }
@@ -275,7 +277,7 @@ function hasAssignmentChanges(currentRounds: LocalRound[], nextRounds: LocalRoun
         const nextParticipant =
           nextRounds[roundIndex]?.courts[courtIndex]?.assignedParticipants[slotIndex] ?? null;
 
-        return participant?.clientId !== nextParticipant?.clientId;
+        return participant?.participantId !== nextParticipant?.participantId;
       })
     )
   );
@@ -1713,24 +1715,24 @@ export default function CreateFreeGamePage() {
                       </div>
                       <div ref={participantListRef} className="max-h-[320px] overflow-y-auto bg-white">
                         {participants.map((participant, index) => {
-                          const partner = partnerLinks[participant.clientId]
-                            ? participantById.get(partnerLinks[participant.clientId]) ?? null
+                          const partner = partnerLinks[participant.participantId]
+                            ? participantById.get(partnerLinks[participant.participantId]) ?? null
                             : null;
                           const isPartnerSource =
-                            partnerSelectionSourceId === participant.clientId;
+                            partnerSelectionSourceId === participant.participantId;
                           const isPartnerCandidate =
                             partnerSelectionSourceId !== null &&
-                            partnerSelectionSourceId !== participant.clientId;
+                            partnerSelectionSourceId !== participant.participantId;
 
                           return (
                             <div
-                              key={participant.clientId}
+                              key={participant.participantId}
                               ref={(element) => {
-                                participantRowRefs.current[participant.clientId] = element;
+                                participantRowRefs.current[participant.participantId] = element;
                               }}
                               onClick={() => {
                                 if (isPartnerCandidate && !isAssignmentEditingLocked) {
-                                  assignPartner(participant.clientId);
+                                  assignPartner(participant.participantId);
                                 }
                               }}
                               className={`grid grid-cols-[56px_minmax(0,2fr)_72px_88px_84px_minmax(0,1.5fr)_48px] items-center gap-4 px-4 py-3 transition-colors ${
@@ -1799,7 +1801,7 @@ export default function CreateFreeGamePage() {
                                         className="border border-violet-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                                         onClick={(event) => {
                                           event.stopPropagation();
-                                          startPartnerSelection(participant.clientId);
+                                          startPartnerSelection(participant.participantId);
                                         }}
                                       >
                                         변경
@@ -1810,7 +1812,7 @@ export default function CreateFreeGamePage() {
                                         className="border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                                         onClick={(event) => {
                                           event.stopPropagation();
-                                          clearPartner(participant.clientId);
+                                          clearPartner(participant.participantId);
                                         }}
                                       >
                                         해제
@@ -1825,7 +1827,7 @@ export default function CreateFreeGamePage() {
                                     className="h-9 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700"
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      startPartnerSelection(participant.clientId);
+                                      startPartnerSelection(participant.participantId);
                                     }}
                                   >
                                     파트너 지정
@@ -1840,7 +1842,7 @@ export default function CreateFreeGamePage() {
                                   className="h-8 w-8 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
                                   onClick={(event) => {
                                     event.stopPropagation();
-                                    removeParticipant(participant.clientId);
+                                    removeParticipant(participant.participantId);
                                   }}
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -1946,7 +1948,7 @@ export default function CreateFreeGamePage() {
                             <div className="grid gap-3 sm:grid-cols-2">
                               {group.participants.map((participant) => (
                                 <div
-                                  key={participant.clientId}
+                                  key={participant.participantId}
                                   className="flex items-center justify-between border-2 border-violet-400 bg-violet-50/20 p-3 text-left text-xs"
                                 >
                                   <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -2340,7 +2342,7 @@ export default function CreateFreeGamePage() {
 
                       return (
                         <button
-                          key={participant.clientId}
+                          key={participant.participantId}
                           type="button"
                           onClick={() => assignParticipantToTarget(participant)}
                           disabled={isDisabled}
