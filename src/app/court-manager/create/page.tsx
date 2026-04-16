@@ -444,6 +444,29 @@ export default function CreateFreeGamePage() {
   }, [isLoading, isLoggedIn]);
 
   useEffect(() => {
+    if (step !== 1) {
+      return;
+    }
+
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverscroll = document.documentElement.style.overscrollBehavior;
+    const previousBodyOverscroll = document.body.style.overscrollBehavior;
+
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overscrollBehavior = "none";
+    document.body.style.overscrollBehavior = "none";
+
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overscrollBehavior = previousHtmlOverscroll;
+      document.body.style.overscrollBehavior = previousBodyOverscroll;
+    };
+  }, [step]);
+
+  useEffect(() => {
     roundsRef.current = rounds;
   }, [rounds]);
 
@@ -1168,7 +1191,7 @@ export default function CreateFreeGamePage() {
     "기본 설정",
     "참가자 구성",
     "코트 배정",
-    "준비 완료",
+    "생성 완료",
   ];
 
   const trimmedGameName = gameName.trim();
@@ -1342,11 +1365,21 @@ export default function CreateFreeGamePage() {
         },
   ];
   const canClearAllAssignments = !isGeneratingAiPreview && hasAssignedParticipants(rounds);
+  const isStepOne = step === 1;
+  const pageContainerClassName = isStepOne
+    ? "container mx-auto flex h-full min-h-0 flex-1 flex-col overflow-hidden px-4 pt-4 pb-2 md:px-8 md:pt-6 md:pb-4 lg:pt-7 lg:pb-5 max-w-5xl"
+    : "container mx-auto max-w-5xl px-4 pt-7 pb-5 md:px-8 md:pt-7 md:pb-6 lg:pt-8 lg:pb-7";
+  const cardClassName = isStepOne
+    ? "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[4px_4px_0px_0px_rgba(15,23,42,1)]"
+    : "relative flex min-h-[500px] flex-col overflow-visible rounded-sm border-2 border-slate-900 bg-white shadow-[4px_4px_0px_0px_rgba(15,23,42,1)]";
+  const contentAreaClassName = isStepOne
+    ? "z-30 flex min-h-0 flex-1 flex-col px-4 pt-6 pb-2 md:px-8 md:pt-7 md:pb-3"
+    : "z-30 flex-1 px-4 py-2 md:px-8 md:py-4";
 
   return (
-    <div className="container mx-auto max-w-5xl px-4 py-8 md:px-8 lg:py-12">
-      <div className="mb-8 md:mb-10">
-        <div className="mb-8 flex items-center justify-between">
+    <div className={pageContainerClassName}>
+      <div className="mb-3 md:mb-4">
+        <div className="mb-1.5 flex items-center justify-between">
           <div>
             <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">
               자유게임 생성
@@ -1374,7 +1407,7 @@ export default function CreateFreeGamePage() {
                 />
               </div>
               <div
-                className={`text-[9px] font-mono uppercase tracking-widest ${
+                className={`text-[10px] font-mono uppercase tracking-[0.14em] ${
                   step >= index ? "font-bold text-slate-900" : "text-slate-400"
                 }`}
               >
@@ -1385,23 +1418,19 @@ export default function CreateFreeGamePage() {
         </div>
       </div>
 
-      <div className="relative flex min-h-[500px] flex-col overflow-visible rounded-sm border-2 border-slate-900 bg-white shadow-[4px_4px_0px_0px_rgba(15,23,42,1)]">
+      <div className={cardClassName}>
         <div className="absolute top-0 left-0 h-4 w-4 border-r-2 border-b-2 border-slate-200" />
         <div className="absolute top-0 right-0 h-4 w-4 border-b-2 border-l-2 border-slate-200" />
         <div className="absolute bottom-0 left-0 h-4 w-4 border-t-2 border-r-2 border-slate-200" />
         <div className="absolute right-0 bottom-0 h-4 w-4 border-t-2 border-l-2 border-slate-200" />
 
-        <div
-          className={`z-10 flex min-h-[52px] items-center border-b px-6 py-3 text-sm font-medium md:px-10 ${
-            submitError
-              ? "border-red-200 bg-red-50 text-red-600"
-              : "border-transparent bg-transparent text-transparent"
-          }`}
-        >
-          {submitError || "\u00A0"}
-        </div>
+        {submitError && (
+          <div className="z-10 flex items-center border-b border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-600 md:px-8">
+            {submitError}
+          </div>
+        )}
 
-        <div className="z-30 flex-1 px-5 py-3 md:px-10 md:py-5">
+        <div className={contentAreaClassName}>
           <AnimatePresence mode="wait">
             {step === 1 && (
               <motion.div
@@ -1410,9 +1439,9 @@ export default function CreateFreeGamePage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
-                className="mx-auto max-w-2xl space-y-5"
+                className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col"
               >
-                <div className="mb-3 border-b-2 border-slate-100 pb-2">
+                <div className="mb-4 border-b-2 border-slate-100 pb-2">
                   <h2 className="font-display text-2xl font-bold text-slate-900">
                     자유게임 설정
                   </h2>
@@ -1421,7 +1450,7 @@ export default function CreateFreeGamePage() {
                   </p>
                 </div>
 
-                <div className="space-y-6">
+                <div className="flex min-h-0 flex-1 flex-col gap-2.5">
                   <div className="space-y-2">
                     <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
                       세션 이름
@@ -1443,7 +1472,7 @@ export default function CreateFreeGamePage() {
                     />
                   </div>
 
-                  <div className="grid gap-6 sm:grid-cols-2">
+                  <div className="grid gap-2.5 sm:grid-cols-2">
                     <div className="space-y-2">
                       <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
                         날짜 및 시간
@@ -1462,7 +1491,7 @@ export default function CreateFreeGamePage() {
                       <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
                         장소
                       </label>
-                      <div className="space-y-3">
+                      <div className="space-y-1.5">
                         <div className="flex gap-2">
                           <button
                             type="button"
@@ -1508,17 +1537,17 @@ export default function CreateFreeGamePage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-6 border-t-2 border-slate-100 pt-4 sm:grid-cols-2">
-                    <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3 border-t-2 border-slate-100 pt-2.5 sm:gap-4">
+                    <div className="space-y-2">
                       <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
                         활성 코트
                       </label>
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2.5 sm:gap-3">
                         <Button
                           variant="outline"
                           size="icon"
                           disabled={isGeneratingAiPreview}
-                          className="h-12 w-12 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
+                          className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-11 sm:w-11"
                           onClick={() => {
                             if (isGeneratingAiPreview) {
                               return;
@@ -1528,14 +1557,14 @@ export default function CreateFreeGamePage() {
                         >
                           -
                         </Button>
-                        <div className="flex h-12 w-20 items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-xl font-bold text-white">
+                        <div className="flex h-10 w-[56px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-lg font-bold text-white sm:h-11 sm:w-16 sm:text-xl">
                           {String(courts).padStart(2, "0")}
                         </div>
                         <Button
                           variant="outline"
                           size="icon"
                           disabled={isGeneratingAiPreview}
-                          className="h-12 w-12 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
+                          className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-11 sm:w-11"
                           onClick={() => {
                             if (isGeneratingAiPreview) {
                               return;
@@ -1548,16 +1577,16 @@ export default function CreateFreeGamePage() {
                       </div>
                     </div>
 
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
                         활성 라운드
                       </label>
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2.5 sm:gap-3">
                         <Button
                           variant="outline"
                           size="icon"
                           disabled={isGeneratingAiPreview}
-                          className="h-12 w-12 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
+                          className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-11 sm:w-11"
                           onClick={() => {
                             if (isGeneratingAiPreview) {
                               return;
@@ -1567,14 +1596,14 @@ export default function CreateFreeGamePage() {
                         >
                           -
                         </Button>
-                        <div className="flex h-12 w-20 items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-xl font-bold text-white">
+                        <div className="flex h-10 w-[56px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-lg font-bold text-white sm:h-11 sm:w-16 sm:text-xl">
                           {String(roundCount).padStart(2, "0")}
                         </div>
                         <Button
                           variant="outline"
                           size="icon"
                           disabled={isGeneratingAiPreview}
-                          className="h-12 w-12 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
+                          className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-11 sm:w-11"
                           onClick={() => {
                             if (isGeneratingAiPreview) {
                               return;
@@ -1948,11 +1977,11 @@ export default function CreateFreeGamePage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
-                className="space-y-5"
+                className="space-y-4"
               >
-                <div className="mb-3 flex flex-col justify-between gap-3 border-b-2 border-slate-100 pb-2 sm:flex-row sm:items-end">
+                <div className="mb-2 flex flex-col justify-between gap-3 border-b-2 border-slate-100 pb-2 sm:flex-row sm:items-end">
                   <div>
-                    <h2 className="font-display text-2xl font-bold uppercase text-slate-900">
+                    <h2 className="font-display text-xl font-bold uppercase text-slate-900 md:text-2xl">
                       코트 배정
                     </h2>
                     <p className="mt-1 text-sm font-mono text-slate-500">
@@ -2023,8 +2052,8 @@ export default function CreateFreeGamePage() {
                   </div>
                 </div>
 
-                <div className="space-y-6">
-                  <div className="border-2 border-slate-200 bg-slate-50 p-4">
+                <div className="space-y-5">
+                  <div className="border-2 border-slate-200 bg-slate-50 p-3">
                     <button
                       type="button"
                       onClick={() =>
@@ -2205,40 +2234,40 @@ export default function CreateFreeGamePage() {
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.4 }}
-                className="flex flex-col items-center justify-center py-16 text-center"
+                className="flex flex-col items-center justify-center py-10 text-center md:py-12"
               >
-                <div className="relative mb-10">
+                <div className="relative mb-6">
                   <div className="absolute inset-0 bg-teal-500 opacity-20 blur-2xl" />
-                  <div className="relative flex h-24 w-24 -rotate-3 items-center justify-center border-2 border-slate-900 bg-teal-500 text-slate-900 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)]">
-                    <Check className="h-10 w-10 stroke-[3]" />
+                  <div className="relative flex h-20 w-20 -rotate-3 items-center justify-center border-2 border-slate-900 bg-teal-500 text-slate-900 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)]">
+                    <Check className="h-9 w-9 stroke-[3]" />
                   </div>
                 </div>
-                <div className="mb-3 text-[10px] font-mono uppercase tracking-widest text-teal-600">
-                  Initialization Complete
+                <div className="mb-2 text-[10px] font-mono uppercase tracking-widest text-teal-600">
+                  생성 완료
                 </div>
-                <h2 className="mb-6 font-display text-4xl font-bold uppercase tracking-tight text-slate-900">
-                  System Ready
+                <h2 className="mb-3 font-display text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+                  자유게임 생성 완료
                 </h2>
-                <p className="mx-auto mb-10 max-w-md text-sm font-medium leading-relaxed text-slate-500">
+                <p className="mx-auto mb-8 max-w-sm text-sm font-medium leading-relaxed text-slate-500">
                   <strong className="text-slate-900">
-                    {gameName || "Weekend Morning Rally"}
+                    {gameName || "자유게임"}
                   </strong>{" "}
-                  has been successfully configured. Proceed to the operations desk to manage the live session.
+                  생성이 끝났어요. 운영 화면으로 이동하거나 링크를 복사하세요.
                 </p>
 
-                <div className="flex w-full max-w-md flex-col gap-4 sm:flex-row">
+                <div className="flex w-full max-w-md flex-col gap-3 sm:flex-row">
                   <Link
                     href={`/court-manager/game/${createdGameId || ""}`}
                     className="flex-1"
                   >
-                    <Button className="h-14 w-full rounded-none bg-slate-900 text-sm font-bold uppercase tracking-widest text-white shadow-[4px_4px_0px_0px_rgba(16,185,129,1)] transition-transform hover:bg-slate-800 active:translate-y-1 active:translate-x-1 active:shadow-none">
-                      Enter Operations
+                    <Button className="h-12 w-full rounded-none bg-slate-900 text-sm font-bold text-white shadow-[4px_4px_0px_0px_rgba(16,185,129,1)] transition-transform hover:bg-slate-800 active:translate-y-1 active:translate-x-1 active:shadow-none">
+                      운영 화면 보기
                       <ChevronRight className="ml-2 h-4 w-4" />
                     </Button>
                   </Link>
                   <Button
                     variant="outline"
-                    className="h-14 rounded-none border-2 border-slate-200 px-8 text-sm font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-50"
+                    className="h-12 rounded-none border-2 border-slate-200 px-8 text-sm font-bold text-slate-600 hover:bg-slate-50"
                     onClick={async () => {
                       if (!createdGameId) {
                         return;
@@ -2248,7 +2277,7 @@ export default function CreateFreeGamePage() {
                       );
                     }}
                   >
-                    Share Link
+                    링크 복사
                   </Button>
                 </div>
               </motion.div>
@@ -2257,7 +2286,7 @@ export default function CreateFreeGamePage() {
         </div>
 
         {step < 4 && (
-          <div className="z-10 flex items-center justify-between border-t-2 border-slate-900 bg-slate-50 p-4 md:p-6">
+          <div className="z-10 flex items-center justify-between border-t-2 border-slate-900 bg-slate-50 px-3 py-2.5 md:p-5">
             <Button
               variant="ghost"
               onClick={handlePrev}
@@ -2282,10 +2311,10 @@ export default function CreateFreeGamePage() {
               <Button
                 onClick={() => void handleNext()}
                 disabled={isSubmitting || (step === 3 && isGeneratingAiPreview)}
-                className="h-12 w-full rounded-none bg-teal-500 font-bold uppercase tracking-widest text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-teal-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:w-[200px]"
+                className="ml-auto h-10 w-[160px] gap-1.5 rounded-none bg-teal-500 px-4 text-xs font-bold uppercase tracking-[0.14em] text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-teal-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:h-11 sm:w-[168px] sm:text-sm sm:tracking-[0.16em]"
               >
                 {nextButtonLabel}
-                {step !== 3 && !isSubmitting && <ChevronRight className="ml-2 h-4 w-4" />}
+                {step !== 3 && !isSubmitting && <ChevronRight className="h-4 w-4" />}
               </Button>
             </div>
           </div>
@@ -2334,7 +2363,7 @@ export default function CreateFreeGamePage() {
                     <input
                       type="text"
                       placeholder="예: 숙지다목적체육관"
-                      className="w-full rounded-none border-2 border-slate-200 bg-slate-50 py-3 pr-4 pl-10 text-sm font-medium transition-colors focus:border-slate-900 focus:bg-white focus:outline-none"
+                      className="h-12 w-full rounded-none border-2 border-slate-200 bg-slate-50 pr-4 pl-10 text-sm font-medium transition-colors focus:border-slate-900 focus:bg-white focus:outline-none"
                       value={locationQuery}
                       onChange={(event) => {
                         setLocationSearchError("");
@@ -2352,7 +2381,7 @@ export default function CreateFreeGamePage() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-[50px] rounded-none border-2 border-slate-900 px-4 text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900"
+                    className="h-12 rounded-none border-2 border-slate-900 px-4 text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900"
                     onClick={() => void handleSearchLocation()}
                     disabled={isSearchingLocation}
                   >

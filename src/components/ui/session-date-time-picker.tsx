@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DayPicker } from "react-day-picker";
 import { ko } from "react-day-picker/locale";
-import { Calendar } from "lucide-react";
+import { Calendar, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TIME_STEP_MINUTES = 10;
@@ -252,16 +252,20 @@ export function SessionDateTimePicker({
     setTimeError("");
   };
 
+  const closePicker = () => {
+    setIsOpen(false);
+  };
+
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
-        setIsOpen(false);
+        closePicker();
       }
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setIsOpen(false);
+        closePicker();
       }
     };
 
@@ -298,7 +302,7 @@ export function SessionDateTimePicker({
 
     if (mode === "date") {
       onChange(buildPickerValue(day, "", mode));
-      setIsOpen(false);
+      closePicker();
       return;
     }
 
@@ -364,7 +368,7 @@ export function SessionDateTimePicker({
 
     setTimeError("");
     onChange(nextValue);
-    setIsOpen(false);
+    closePicker();
   };
 
   const isDayDisabled = (day: Date) => {
@@ -420,142 +424,167 @@ export function SessionDateTimePicker({
       </button>
 
       {isOpen && (
-        <div
-          className={cn(
-            "absolute left-0 z-50 w-[min(40rem,calc(100vw-3rem))] border-2 border-slate-900 bg-white p-3 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)]",
-            placement === "top" ? "bottom-full mb-2" : "top-full mt-2",
-            mode === "date" ? "max-w-[24rem]" : ""
-          )}
-        >
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-slate-950/28 sm:hidden"
+            aria-hidden="true"
+            onClick={closePicker}
+          />
           <div
             className={cn(
-              "grid gap-3",
-              mode === "date" ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1fr)_15rem]"
+              "fixed inset-x-4 top-1/2 z-50 max-h-[calc(100vh-2rem)] -translate-y-1/2 overflow-y-auto border-2 border-slate-900 bg-white p-3 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] sm:absolute sm:left-0 sm:right-auto sm:top-auto sm:max-h-none sm:w-[min(40rem,calc(100vw-3rem))] sm:translate-y-0 sm:overflow-visible",
+              placement === "top"
+                ? "sm:bottom-full sm:mb-2"
+                : "sm:top-full sm:mt-2",
+              mode === "date" ? "sm:max-w-[24rem]" : ""
             )}
           >
-            <div className="border-2 border-slate-100 bg-slate-50 p-3">
-              <div className="max-h-[18.5rem] overflow-auto">
-                <DayPicker
-                  mode="single"
-                  selected={selectedDay}
-                  onSelect={handleDaySelect}
-                  disabled={isDayDisabled}
-                  startMonth={visibleMonthStart}
-                  endMonth={visibleMonthEnd}
-                  defaultMonth={defaultMonth}
-                  navLayout="around"
-                  showOutsideDays={false}
-                  locale={ko}
-                  classNames={{
-                    root: "w-full",
-                    months: "w-full",
-                    month:
-                      "grid w-full grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] grid-rows-[2.25rem_auto] items-center gap-y-3",
-                    month_caption:
-                      "col-start-2 row-start-1 flex h-9 items-center justify-center text-sm font-bold tracking-tight text-slate-900",
-                    caption_label: "block text-center leading-none",
-                    button_previous:
-                      "col-start-1 row-start-1 flex h-9 w-9 self-center items-center justify-center border-2 border-slate-200 bg-white text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50",
-                    button_next:
-                      "col-start-3 row-start-1 flex h-9 w-9 self-center items-center justify-center border-2 border-slate-200 bg-white text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50",
-                    month_grid: "col-span-3 row-start-2 w-full border-collapse",
-                    weekdays: "border-b-2 border-slate-200",
-                    weekday:
-                      "pb-2 text-center text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400",
-                    week: "mt-1",
-                    day: "p-0 text-center",
-                    day_button:
-                      "flex h-10 w-full items-center justify-center border border-slate-100 bg-white text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50",
-                    today: "text-teal-600",
-                    selected:
-                      "bg-teal-500 text-slate-950 hover:bg-teal-400 border-slate-900",
-                    outside: "text-slate-300",
-                    disabled:
-                      "bg-slate-50 text-slate-300 [&>button]:cursor-not-allowed [&>button]:border-slate-100 [&>button]:bg-slate-50 [&>button]:text-slate-300 [&>button]:hover:bg-slate-50",
-                  }}
-                />
+            <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-2 sm:hidden">
+              <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                {mode === "date" ? "날짜 선택" : "날짜 및 시간 선택"}
               </div>
+              <button
+                type="button"
+                onClick={closePicker}
+                aria-label="날짜 선택 닫기"
+                className="flex h-8 w-8 items-center justify-center border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-900 hover:text-slate-900"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            {mode === "date-time" ? (
-              <div className="border-2 border-slate-100 bg-white p-3">
-                <div className="mb-3">
-                  <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
-                    시간 입력
-                  </div>
+            <div
+              className={cn(
+                "grid gap-3",
+                mode === "date"
+                  ? "grid-cols-1"
+                  : "grid-cols-1 md:grid-cols-[minmax(0,1fr)_15rem]"
+              )}
+            >
+              <div className="border-2 border-slate-100 bg-slate-50 p-3">
+                <div className="max-h-[18.5rem] overflow-auto">
+                  <DayPicker
+                    mode="single"
+                    selected={selectedDay}
+                    onSelect={handleDaySelect}
+                    disabled={isDayDisabled}
+                    startMonth={visibleMonthStart}
+                    endMonth={visibleMonthEnd}
+                    defaultMonth={defaultMonth}
+                    navLayout="around"
+                    showOutsideDays={false}
+                    locale={ko}
+                    classNames={{
+                      root: "w-full",
+                      months: "w-full",
+                      month:
+                        "grid w-full grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] grid-rows-[2.25rem_auto] items-center gap-y-3",
+                      month_caption:
+                        "col-start-2 row-start-1 flex h-9 items-center justify-center text-sm font-bold tracking-tight text-slate-900",
+                      caption_label: "block text-center leading-none",
+                      button_previous:
+                        "col-start-1 row-start-1 flex h-9 w-9 self-center items-center justify-center border-2 border-slate-200 bg-white text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50",
+                      button_next:
+                        "col-start-3 row-start-1 flex h-9 w-9 self-center items-center justify-center border-2 border-slate-200 bg-white text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50",
+                      month_grid: "col-span-3 row-start-2 w-full border-collapse",
+                      weekdays: "border-b-2 border-slate-200",
+                      weekday:
+                        "pb-2 text-center text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400",
+                      week: "mt-1",
+                      day: "p-0 text-center",
+                      day_button:
+                        "flex h-10 w-full items-center justify-center border border-slate-100 bg-white text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50",
+                      today: "text-teal-600",
+                      selected:
+                        "bg-teal-500 text-slate-950 hover:bg-teal-400 border-slate-900",
+                      outside: "text-slate-300",
+                      disabled:
+                        "bg-slate-50 text-slate-300 [&>button]:cursor-not-allowed [&>button]:border-slate-100 [&>button]:bg-slate-50 [&>button]:text-slate-300 [&>button]:hover:bg-slate-50",
+                    }}
+                  />
                 </div>
-
-                {selectedDay ? (
-                  <div className="max-h-[18.5rem] space-y-3 overflow-y-auto pr-1">
-                    <div className="border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-slate-500">
-                      {formatDateLabel(selectedDay)}
-                    </div>
-
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-mono font-bold tracking-widest text-slate-400">
-                          시
-                        </label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={2}
-                          value={hourInput}
-                          onChange={(event) => {
-                            setHourInput(sanitizeHourInput(event.target.value));
-                            setTimeError("");
-                          }}
-                          placeholder="15"
-                          className="h-11 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-center text-sm font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
-                        />
-                      </div>
-                      <div className="pb-3 text-lg font-bold text-slate-400">:</div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-mono font-bold tracking-widest text-slate-400">
-                          분
-                        </label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={2}
-                          value={minuteInput}
-                          onChange={(event) => {
-                            setMinuteInput(sanitizeMinuteInput(event.target.value));
-                            setTimeError("");
-                          }}
-                          placeholder="10"
-                          className="h-11 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-center text-sm font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="text-[10px] font-mono tracking-widest text-slate-400">
-                      24시간 형식으로 입력하고 분은 10분 단위를 사용해주세요.
-                    </div>
-
-                    {timeError ? (
-                      <div className="text-[11px] font-medium text-red-600">
-                        {timeError}
-                      </div>
-                    ) : null}
-
-                    <button
-                      type="button"
-                      onClick={applyManualTime}
-                      className="h-11 w-full border-2 border-slate-900 bg-teal-500 text-sm font-bold tracking-widest text-slate-950 transition-colors hover:bg-teal-400"
-                    >
-                      시간 적용
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex min-h-[10rem] items-center justify-center border border-dashed border-slate-200 bg-slate-50 px-4 text-center text-[11px] font-mono uppercase tracking-widest text-slate-400">
-                    먼저 날짜를 선택해주세요
-                  </div>
-                )}
               </div>
-            ) : null}
+
+              {mode === "date-time" ? (
+                <div className="border-2 border-slate-100 bg-white p-3">
+                  <div className="mb-3">
+                    <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
+                      시간 입력
+                    </div>
+                  </div>
+
+                  {selectedDay ? (
+                    <div className="max-h-[18.5rem] space-y-3 overflow-y-auto pr-1">
+                      <div className="border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+                        {formatDateLabel(selectedDay)}
+                      </div>
+
+                      <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-mono font-bold tracking-widest text-slate-400">
+                            시
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={2}
+                            value={hourInput}
+                            onChange={(event) => {
+                              setHourInput(sanitizeHourInput(event.target.value));
+                              setTimeError("");
+                            }}
+                            placeholder="15"
+                            className="h-11 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-center text-sm font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
+                          />
+                        </div>
+                        <div className="pb-3 text-lg font-bold text-slate-400">:</div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-mono font-bold tracking-widest text-slate-400">
+                            분
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={2}
+                            value={minuteInput}
+                            onChange={(event) => {
+                              setMinuteInput(sanitizeMinuteInput(event.target.value));
+                              setTimeError("");
+                            }}
+                            placeholder="10"
+                            className="h-11 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-center text-sm font-bold text-slate-900 focus:border-slate-900 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="text-[10px] font-mono tracking-widest text-slate-400">
+                        24시간 형식으로 입력하고 분은 10분 단위를 사용해주세요.
+                      </div>
+
+                      {timeError ? (
+                        <div className="text-[11px] font-medium text-red-600">
+                          {timeError}
+                        </div>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        onClick={applyManualTime}
+                        className="h-11 w-full border-2 border-slate-900 bg-teal-500 text-sm font-bold tracking-widest text-slate-950 transition-colors hover:bg-teal-400"
+                      >
+                        시간 적용
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[10rem] items-center justify-center border border-dashed border-slate-200 bg-slate-50 px-4 text-center text-[11px] font-mono uppercase tracking-widest text-slate-400">
+                      먼저 날짜를 선택해주세요
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );
