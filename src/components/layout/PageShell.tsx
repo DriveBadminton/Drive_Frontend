@@ -16,13 +16,13 @@ export default function PageShell({
   disableHeader = false,
 }: PageShellProps) {
   return (
-    <div className="flex min-h-screen min-h-[100dvh] flex-col bg-slate-50 text-slate-900">
+    <div className="flex min-h-screen min-h-[100svh] flex-col bg-slate-50 text-slate-900">
       {!disableHeader && <MainHeader />}
       <main
         className={
           mainClassName
-            ? `min-h-[calc(100vh-4rem)] min-h-[calc(100dvh-4rem)] flex-1 ${mainClassName}`
-            : "min-h-[calc(100vh-4rem)] min-h-[calc(100dvh-4rem)] flex-1"
+            ? `flex min-h-0 flex-1 flex-col ${mainClassName}`
+            : "flex min-h-0 flex-1 flex-col"
         }
       >
         {children}
