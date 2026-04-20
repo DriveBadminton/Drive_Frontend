@@ -1728,74 +1728,138 @@ export default function CreateFreeGamePage() {
   const canClearAllAssignments = !isGeneratingAiPreview && hasAssignedParticipants(rounds);
   const stepHeaderMeta =
     step === 3 ? (
-      <div className="toolbar-scroll-hidden flex w-full items-center gap-2 overflow-x-auto pb-1 md:w-auto md:justify-end md:overflow-visible md:pb-0">
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          {aiAssignmentIndicators.map((item) => {
-            const Icon = item.icon;
-
-            return (
-              <Tooltip
-                key={item.key}
-                message={`${item.label}: ${item.value}`}
-                position="top"
-              >
-                {item.interactive ? (
-                  <button
-                    type="button"
-                    aria-label={`${item.label}: ${item.value}`}
-                    disabled={isAssignmentEditingLocked}
-                    onClick={item.onClick ?? undefined}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors sm:h-9 sm:w-9 ${
-                      isAssignmentEditingLocked
-                        ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 shadow-none"
-                        : item.className
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </button>
-                ) : (
-                  <div
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors sm:h-9 sm:w-9 ${item.className}`}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </div>
-                )}
-              </Tooltip>
-            );
-          })}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={!canClearAllAssignments}
-            onClick={handleClearAllAssignments}
-            className="h-8 shrink-0 rounded-none border-2 border-slate-300 bg-white px-2.5 font-mono text-[9px] uppercase tracking-[0.14em] text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:h-9 sm:px-3 sm:text-[10px] sm:tracking-widest"
-          >
-            <X className="mr-1 h-3 w-3 sm:mr-2" />
-            <span className="sm:hidden">초기화</span>
-            <span className="hidden sm:inline">전체 배정 초기화</span>
-          </Button>
+      <div className="w-full md:w-auto">
+        <div className="flex flex-col gap-2 md:hidden">
           <Button
             type="button"
             size="sm"
             disabled={isGeneratingAiPreview}
             onClick={() => void handleGenerateAiPreview()}
-            className="h-8 shrink-0 rounded-none bg-emerald-500 px-2.5 font-mono text-[9px] uppercase tracking-[0.14em] text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-emerald-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:h-9 sm:px-3 sm:text-[10px] sm:tracking-widest"
+            className="h-10 w-full rounded-none bg-emerald-500 px-3 font-mono text-[10px] uppercase tracking-[0.16em] text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-emerald-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none"
           >
             {isGeneratingAiPreview ? (
-              <LoaderCircle className="mr-1 h-3 w-3 animate-spin sm:mr-2" />
+              <LoaderCircle className="mr-2 h-3.5 w-3.5 animate-spin" />
             ) : (
-              <Activity className="mr-1 h-3 w-3 sm:mr-2" />
+              <Activity className="mr-2 h-3.5 w-3.5" />
             )}
-            <span className="sm:hidden">
-              {isGeneratingAiPreview ? "배정 중" : "AI 배정"}
-            </span>
-            <span className="hidden sm:inline">
-              {isGeneratingAiPreview ? "AI 배정 중..." : "AI 자동 배정"}
-            </span>
+            {isGeneratingAiPreview ? "AI 배정 중..." : "AI 자동 배정"}
           </Button>
+
+          <div className="toolbar-scroll-hidden flex items-center gap-1.5 overflow-x-auto pb-1">
+            {aiAssignmentIndicators.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <Tooltip
+                  key={item.key}
+                  message={`${item.label}: ${item.value}`}
+                  position="top"
+                >
+                  {item.interactive ? (
+                    <button
+                      type="button"
+                      aria-label={`${item.label}: ${item.value}`}
+                      disabled={isAssignmentEditingLocked}
+                      onClick={item.onClick ?? undefined}
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors ${
+                        isAssignmentEditingLocked
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 shadow-none"
+                          : item.className
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <div
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors ${item.className}`}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </div>
+                  )}
+                </Tooltip>
+              );
+            })}
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!canClearAllAssignments}
+              onClick={handleClearAllAssignments}
+              className="h-9 shrink-0 rounded-none border-2 border-slate-300 bg-white px-2.5 font-mono text-[9px] uppercase tracking-[0.14em] text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+            >
+              <X className="mr-1 h-3 w-3" />
+              초기화
+            </Button>
+          </div>
+        </div>
+
+        <div className="hidden items-center gap-2 md:flex md:justify-end">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            {aiAssignmentIndicators.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <Tooltip
+                  key={item.key}
+                  message={`${item.label}: ${item.value}`}
+                  position="top"
+                >
+                  {item.interactive ? (
+                    <button
+                      type="button"
+                      aria-label={`${item.label}: ${item.value}`}
+                      disabled={isAssignmentEditingLocked}
+                      onClick={item.onClick ?? undefined}
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors sm:h-9 sm:w-9 ${
+                        isAssignmentEditingLocked
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 shadow-none"
+                          : item.className
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors sm:h-9 sm:w-9 ${item.className}`}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </div>
+                  )}
+                </Tooltip>
+              );
+            })}
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!canClearAllAssignments}
+              onClick={handleClearAllAssignments}
+              className="h-8 shrink-0 rounded-none border-2 border-slate-300 bg-white px-2.5 font-mono text-[9px] uppercase tracking-[0.14em] text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:h-9 sm:px-3 sm:text-[10px] sm:tracking-widest"
+            >
+              <X className="mr-1 h-3 w-3 sm:mr-2" />
+              <span className="sm:hidden">초기화</span>
+              <span className="hidden sm:inline">전체 배정 초기화</span>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isGeneratingAiPreview}
+              onClick={() => void handleGenerateAiPreview()}
+              className="h-8 shrink-0 rounded-none bg-emerald-500 px-2.5 font-mono text-[9px] uppercase tracking-[0.14em] text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-emerald-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:h-9 sm:px-3 sm:text-[10px] sm:tracking-widest"
+            >
+              {isGeneratingAiPreview ? (
+                <LoaderCircle className="mr-1 h-3 w-3 animate-spin sm:mr-2" />
+              ) : (
+                <Activity className="mr-1 h-3 w-3 sm:mr-2" />
+              )}
+              <span className="hidden sm:inline">
+                {isGeneratingAiPreview ? "AI 배정 중..." : "AI 자동 배정"}
+              </span>
+            </Button>
+          </div>
         </div>
       </div>
     ) : undefined;
@@ -2741,21 +2805,21 @@ export default function CreateFreeGamePage() {
                   role="region"
                   aria-label="코트 배정 본문"
                 >
-                  <div className="space-y-5">
-                    <div className="border-2 border-slate-200 bg-slate-50 p-3">
+                  <div className="space-y-4 md:space-y-5">
+                    <div className="border-2 border-slate-200 bg-slate-50 p-2.5 md:p-3">
                       <button
                         type="button"
                         onClick={() =>
                           setIsParticipantSummaryCollapsed((current) => !current)
                         }
-                        className="flex w-full items-center justify-between gap-3 text-left"
+                        className="flex w-full items-center justify-between gap-2.5 text-left"
                         aria-expanded={!isParticipantSummaryCollapsed}
                       >
-                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
                           <h3 className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
                             참가자 요약
                           </h3>
-                          <p className="min-w-0 truncate text-xs font-mono text-slate-500">
+                          <p className="min-w-0 truncate text-[11px] font-mono text-slate-500 md:text-xs">
                             {participantSummaryMeta}
                           </p>
                         </div>
@@ -2850,31 +2914,33 @@ export default function CreateFreeGamePage() {
                       </div>
                     ) : (
                       rounds.map((round, roundIndex) => (
-                        <div key={round.id} className="space-y-6">
-                          <div className="flex items-center gap-4">
-                            <div className="h-px flex-1 bg-slate-200" />
-                            <span className="bg-slate-900 px-3 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-white">
-                              라운드 {String(roundIndex + 1).padStart(2, "0")}
-                            </span>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={isAssignmentEditingLocked}
-                              className="h-6 rounded-none border border-slate-300 text-[10px] font-bold uppercase tracking-widest"
-                              onClick={() => addCourtToRound(round.id)}
-                            >
-                              + 코트 추가
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              disabled={isAssignmentEditingLocked}
-                              className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
-                              onClick={() => removeRoundBlock(round.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                            <div className="h-px flex-1 bg-slate-200" />
+                        <div key={round.id} className="space-y-3 md:space-y-6">
+                          <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2 md:border-b-0 md:pb-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="bg-slate-900 px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-white md:px-3">
+                                라운드 {String(roundIndex + 1).padStart(2, "0")}
+                              </span>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isAssignmentEditingLocked}
+                                className="h-7 rounded-none border border-slate-300 px-2.5 text-[9px] font-bold uppercase tracking-[0.14em] md:h-6 md:px-2 md:text-[10px] md:tracking-widest"
+                                onClick={() => addCourtToRound(round.id)}
+                              >
+                                + 코트 추가
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                disabled={isAssignmentEditingLocked}
+                                className="h-7 w-7 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500 md:h-6 md:w-6"
+                                onClick={() => removeRoundBlock(round.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
 
                           {round.courts.length === 0 ? (
@@ -2884,13 +2950,13 @@ export default function CreateFreeGamePage() {
                               </div>
                             </div>
                           ) : (
-                            <div className="mx-auto flex max-w-[1140px] flex-wrap justify-center gap-7">
+                            <div className="mx-auto flex max-w-[1140px] flex-wrap justify-center gap-3 md:gap-7">
                               {round.courts.map((court, courtIndex) => (
                                 <div
                                   key={court.id}
                                   className="w-full max-w-[264px] shrink-0 space-y-1 sm:w-[264px]"
                                 >
-                                  <div className="flex items-center justify-between">
+                                  <div className="flex items-center justify-between px-0.5">
                                     <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
                                       코트 {String(courtIndex + 1).padStart(2, "0")}
                                     </span>
