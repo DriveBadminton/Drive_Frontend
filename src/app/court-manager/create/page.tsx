@@ -1883,16 +1883,21 @@ export default function CreateFreeGamePage() {
               meta: stepHeaderMeta,
             }
           : null;
+  const isCompletionStep = step === 4;
   const isContentDrivenStep = step === 1 || step === 2;
   const pageContainerClassName =
     "container mx-auto flex h-full min-h-0 max-w-5xl flex-1 flex-col overflow-hidden px-4 pt-4 pb-2 md:px-8 md:pt-6 md:pb-4 lg:pt-7 lg:pb-5";
   const cardClassName =
     `relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] ${
-      isContentDrivenStep ? "md:flex-none" : ""
+      isCompletionStep ? "flex-none" : isContentDrivenStep ? "md:flex-none" : ""
     }`;
   const contentAreaClassName =
     `z-30 flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 md:px-8 md:py-5 lg:py-6 ${
-      isContentDrivenStep ? "md:flex-none md:overflow-visible" : ""
+      isCompletionStep
+        ? "flex-none overflow-visible"
+        : isContentDrivenStep
+          ? "md:flex-none md:overflow-visible"
+          : ""
     }`;
 
   return (
@@ -2995,7 +3000,7 @@ export default function CreateFreeGamePage() {
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.4 }}
-                className="flex flex-col items-center justify-center py-10 text-center md:py-12"
+                className="mx-auto flex w-full max-w-xl flex-col items-center py-8 text-center md:py-10"
               >
                 <div className="relative mb-6">
                   <div className="absolute inset-0 bg-teal-500 opacity-20 blur-2xl" />
