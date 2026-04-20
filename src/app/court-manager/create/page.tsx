@@ -597,8 +597,8 @@ const BadmintonCourt = ({
   selectAssignmentTarget: (roundId: string, courtId: string, slotIndex: number) => void;
 }) => {
   return (
-    <div className="relative mx-auto flex aspect-[11/6] w-full max-w-[264px] overflow-hidden rounded-none border-4 border-slate-900 bg-emerald-700 px-3 py-2.5 shadow-inner">
-      <div className="pointer-events-none absolute inset-[10px]">
+    <div className="relative mx-auto flex aspect-[11/6] w-full max-w-none overflow-hidden rounded-none border-4 border-slate-900 bg-emerald-700 px-2 py-1.5 shadow-inner sm:px-3 sm:py-2.5">
+      <div className="pointer-events-none absolute inset-[9px] sm:inset-[10px]">
         <div className="absolute inset-0 border-2 border-white/42" />
 
         <div className="absolute inset-y-0 left-[5.7%] w-0.5 bg-white/28" />
@@ -616,7 +616,7 @@ const BadmintonCourt = ({
         <div className="absolute top-1/2 left-[64.8%] right-[5.7%] h-0.5 -translate-y-1/2 bg-white/38" />
       </div>
 
-      <div className="relative z-10 grid h-full w-full grid-cols-2 grid-rows-2 gap-1.5 px-3.5 py-2.5">
+      <div className="relative z-10 grid h-full w-full grid-cols-2 grid-rows-2 gap-1 px-2.5 py-1.5 sm:gap-1.5 sm:px-3.5 sm:py-2.5">
         {[0, 1, 2, 3].map((index) => {
           const participant = court.assignedParticipants[index];
           const isSelectedTarget =
@@ -625,13 +625,13 @@ const BadmintonCourt = ({
             assignmentTarget.slotIndex === index;
 
           return (
-            <div key={index} className="flex items-center justify-center p-1">
+            <div key={index} className="flex items-center justify-center p-0.5 sm:p-1">
               {participant ? (
-                <div className="flex min-w-[64px] max-w-[84%] flex-col items-center justify-center rounded-none border-2 border-slate-900 bg-white px-2.5 py-1.5 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)]">
-                  <div className="w-full truncate text-center text-[10px] leading-tight font-bold text-slate-900">
+                <div className="flex min-w-[56px] max-w-[84%] flex-col items-center justify-center rounded-none border-2 border-slate-900 bg-white px-1.5 py-1 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] sm:min-w-[64px] sm:px-2.5 sm:py-1.5">
+                  <div className="w-full truncate text-center text-[9px] leading-tight font-bold text-slate-900 sm:text-[10px]">
                     {participant.name}
                   </div>
-                  <div className="mt-0.5 text-[7px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                  <div className="mt-0.5 text-[6px] font-mono font-bold uppercase tracking-[0.12em] text-slate-500 sm:text-[7px] sm:tracking-widest">
                     {getGenderLabel(participant.gender)}/{getAgeGroupLabel(participant.ageGroup)}
                   </div>
                 </div>
@@ -640,7 +640,7 @@ const BadmintonCourt = ({
                   type="button"
                   disabled={isLocked}
                   onClick={() => selectAssignmentTarget(roundId, court.id, index)}
-                  className={`flex h-6 w-full max-w-[46px] items-center justify-center rounded-none border-2 text-[8px] font-bold uppercase tracking-widest shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all ${
+                  className={`flex h-5.5 w-full max-w-[40px] items-center justify-center rounded-none border-2 text-[7px] font-bold uppercase tracking-[0.12em] shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all sm:h-6 sm:max-w-[46px] sm:text-[8px] sm:tracking-widest ${
                     isLocked
                       ? "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-400 shadow-none"
                       : isSelectedTarget
@@ -1745,7 +1745,7 @@ export default function CreateFreeGamePage() {
             {isGeneratingAiPreview ? "AI 배정 중..." : "AI 자동 배정"}
           </Button>
 
-          <div className="toolbar-scroll-hidden flex items-center gap-1.5 overflow-x-auto pb-1">
+          <div className="toolbar-scroll-hidden flex items-center gap-1 overflow-x-auto rounded-sm border border-slate-200 bg-slate-50 px-1 py-1 pb-1">
             {aiAssignmentIndicators.map((item) => {
               const Icon = item.icon;
 
@@ -2800,26 +2800,26 @@ export default function CreateFreeGamePage() {
                 className="flex min-h-0 flex-1 flex-col"
               >
                 <div
-                  className="wizard-scroll create-step-shell min-h-0 flex-1 pr-0.5 md:pr-1"
+                  className="workbench-scroll create-step-shell min-h-0 flex-1 pr-0.5 md:pr-1"
                   tabIndex={0}
                   role="region"
                   aria-label="코트 배정 본문"
                 >
-                  <div className="space-y-4 md:space-y-5">
-                    <div className="border-2 border-slate-200 bg-slate-50 p-2.5 md:p-3">
+                  <div className="space-y-3 pb-1 md:space-y-5 md:pb-2">
+                    <div className="border-2 border-slate-200 bg-slate-50 p-2 md:p-3">
                       <button
                         type="button"
                         onClick={() =>
                           setIsParticipantSummaryCollapsed((current) => !current)
                         }
-                        className="flex w-full items-center justify-between gap-2.5 text-left"
+                        className="flex w-full items-center justify-between gap-2 text-left"
                         aria-expanded={!isParticipantSummaryCollapsed}
                       >
-                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <div className="flex min-w-0 flex-1 items-center gap-1.5">
                           <h3 className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
                             참가자 요약
                           </h3>
-                          <p className="min-w-0 truncate text-[11px] font-mono text-slate-500 md:text-xs">
+                          <p className="min-w-0 truncate text-[10px] font-mono text-slate-500 md:text-xs">
                             {participantSummaryMeta}
                           </p>
                         </div>
@@ -2845,56 +2845,49 @@ export default function CreateFreeGamePage() {
                             className="overflow-hidden"
                           >
                             <div className="mt-3 border-t border-slate-200 pt-3">
-                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                              <div className="grid grid-cols-2 gap-2.5 md:gap-3 xl:grid-cols-4">
                                 {participantSummaryGroups.map((group) =>
                                   group.type === "pair" ? (
-                                    <div key={group.key} className="relative xl:col-span-2">
-                                      <div className="grid gap-3 sm:grid-cols-2">
+                                    <div key={group.key} className="relative col-span-2 xl:col-span-2">
+                                      <div className="grid grid-cols-2 gap-2.5 md:gap-3">
                                         {group.participants.map((participant) => (
                                           <div
                                             key={participant.participantId}
-                                            className="flex items-center justify-between border-2 border-violet-400 bg-violet-50/20 p-3 text-left text-xs"
+                                            className="flex min-w-0 items-center justify-between gap-2 border-2 border-violet-400 bg-violet-50/20 p-2 text-left text-[11px] md:p-3 md:text-xs"
                                           >
-                                            <div className="flex min-w-0 flex-1 items-center gap-2">
-                                              <span className="truncate font-bold text-slate-900">
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                              <span className="min-w-0 truncate font-bold text-slate-900">
                                                 {participant.name}
                                               </span>
-                                              <span className="shrink-0 font-mono text-slate-500">
-                                                {getGenderLabel(participant.gender)}/
-                                                {getAgeGroupLabel(
-                                                  participant.ageGroup
-                                                )}
+                                              <span className="shrink-0 font-mono text-[9px] text-slate-500 md:text-[10px]">
+                                                {getGenderLabel(participant.gender)} ·{" "}
+                                                {getAgeGroupCompactLabel(participant.ageGroup)}
                                               </span>
                                             </div>
-                                            <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
-                                              게임 수 {participant.gamesAssigned}
+                                            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] font-bold text-slate-900 md:text-[10px]">
+                                              {participant.gamesAssigned}회
                                             </span>
                                           </div>
                                         ))}
                                       </div>
-                                      <div className="pointer-events-none absolute top-1/2 left-1/2 hidden h-[3px] w-4 -translate-x-1/2 -translate-y-1/2 bg-violet-500 sm:block" />
-                                      <div className="mt-2 flex items-center justify-center sm:hidden">
-                                        <div className="h-[3px] w-4 bg-violet-500" />
-                                      </div>
+                                      <div className="pointer-events-none absolute top-1/2 left-1/2 h-[3px] w-4 -translate-x-1/2 -translate-y-1/2 bg-violet-500" />
                                     </div>
                                   ) : (
                                     <div
                                       key={group.key}
-                                      className="flex items-center justify-between border border-slate-200 bg-white p-3 text-left text-xs"
+                                      className="flex min-w-0 items-center justify-between gap-2 border border-slate-200 bg-white p-2 text-left text-[11px] md:p-3 md:text-xs"
                                     >
-                                      <div className="flex min-w-0 flex-1 items-center gap-2">
-                                        <span className="truncate font-bold text-slate-900">
+                                      <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="min-w-0 truncate font-bold text-slate-900">
                                           {group.participant.name}
                                         </span>
-                                        <span className="shrink-0 font-mono text-slate-500">
-                                          {getGenderLabel(group.participant.gender)}/
-                                          {getAgeGroupLabel(
-                                            group.participant.ageGroup
-                                          )}
+                                        <span className="shrink-0 font-mono text-[9px] text-slate-500 md:text-[10px]">
+                                          {getGenderLabel(group.participant.gender)} ·{" "}
+                                          {getAgeGroupCompactLabel(group.participant.ageGroup)}
                                         </span>
                                       </div>
-                                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
-                                        게임 수 {group.participant.gamesAssigned}
+                                      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] font-bold text-slate-900 md:text-[10px]">
+                                        {group.participant.gamesAssigned}회
                                       </span>
                                     </div>
                                   )
@@ -2914,76 +2907,81 @@ export default function CreateFreeGamePage() {
                       </div>
                     ) : (
                       rounds.map((round, roundIndex) => (
-                        <div key={round.id} className="space-y-3 md:space-y-6">
-                          <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2 md:border-b-0 md:pb-0">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <span className="bg-slate-900 px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-white md:px-3">
-                                라운드 {String(roundIndex + 1).padStart(2, "0")}
-                              </span>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={isAssignmentEditingLocked}
-                                className="h-7 rounded-none border border-slate-300 px-2.5 text-[9px] font-bold uppercase tracking-[0.14em] md:h-6 md:px-2 md:text-[10px] md:tracking-widest"
-                                onClick={() => addCourtToRound(round.id)}
-                              >
-                                + 코트 추가
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                disabled={isAssignmentEditingLocked}
-                                className="h-7 w-7 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500 md:h-6 md:w-6"
-                                onClick={() => removeRoundBlock(round.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-
-                          {round.courts.length === 0 ? (
-                            <div className="border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
-                              <div className="text-sm font-medium text-slate-500">
-                                이 라운드에는 아직 코트가 없습니다.
+                        <section
+                          key={round.id}
+                          className="rounded-sm border border-slate-200 bg-slate-50/70 p-2.5 md:p-3.5"
+                        >
+                          <div className="mx-auto w-full max-w-[760px] space-y-3 md:space-y-4 lg:max-w-[920px]">
+                            <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-2.5">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="bg-slate-900 px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-white md:px-3">
+                                  라운드 {String(roundIndex + 1).padStart(2, "0")}
+                                </span>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={isAssignmentEditingLocked}
+                                  className="h-7 rounded-none border border-slate-300 bg-white px-2 text-[9px] font-bold uppercase tracking-[0.14em] md:h-6 md:px-2 md:text-[10px] md:tracking-widest"
+                                  onClick={() => addCourtToRound(round.id)}
+                                >
+                                  + 코트 추가
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  disabled={isAssignmentEditingLocked}
+                                  className="h-7 w-7 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500 md:h-6 md:w-6"
+                                  onClick={() => removeRoundBlock(round.id)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
                               </div>
                             </div>
-                          ) : (
-                            <div className="mx-auto flex max-w-[1140px] flex-wrap justify-center gap-3 md:gap-7">
-                              {round.courts.map((court, courtIndex) => (
-                                <div
-                                  key={court.id}
-                                  className="w-full max-w-[264px] shrink-0 space-y-1 sm:w-[264px]"
-                                >
-                                  <div className="flex items-center justify-between px-0.5">
-                                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
-                                      코트 {String(courtIndex + 1).padStart(2, "0")}
-                                    </span>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      disabled={isAssignmentEditingLocked}
-                                      className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
-                                      onClick={() =>
-                                        removeCourtFromRound(round.id, court.id)
-                                      }
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                  <BadmintonCourt
-                                    court={court}
-                                    roundId={round.id}
-                                    assignmentTarget={assignmentTarget}
-                                    isLocked={isAssignmentEditingLocked}
-                                    selectAssignmentTarget={selectAssignmentTarget}
-                                  />
+
+                            {round.courts.length === 0 ? (
+                              <div className="border-2 border-dashed border-slate-200 bg-white px-6 py-10 text-center">
+                                <div className="text-sm font-medium text-slate-500">
+                                  이 라운드에는 아직 코트가 없습니다.
                                 </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 gap-3 min-[390px]:grid-cols-2 md:grid-cols-2 md:gap-4 lg:flex lg:flex-wrap lg:justify-center lg:gap-5">
+                                {round.courts.map((court, courtIndex) => (
+                                  <div
+                                    key={court.id}
+                                    className="w-full min-w-0 space-y-0.5 md:space-y-1 lg:w-[264px] lg:flex-none"
+                                  >
+                                    <div className="flex items-center justify-between px-0.5">
+                                      <span className="text-[9px] font-mono font-bold uppercase tracking-[0.14em] text-slate-400 sm:text-[10px] sm:tracking-widest">
+                                        코트 {String(courtIndex + 1).padStart(2, "0")}
+                                      </span>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        disabled={isAssignmentEditingLocked}
+                                        className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
+                                        onClick={() =>
+                                          removeCourtFromRound(round.id, court.id)
+                                        }
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                    <BadmintonCourt
+                                      court={court}
+                                      roundId={round.id}
+                                      assignmentTarget={assignmentTarget}
+                                      isLocked={isAssignmentEditingLocked}
+                                      selectAssignmentTarget={selectAssignmentTarget}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </section>
                       ))
                     )}
                   </div>
