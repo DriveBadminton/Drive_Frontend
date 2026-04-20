@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Activity,
@@ -16,6 +16,7 @@ import {
   Scale,
   ShieldCheck,
   Shuffle,
+  Plus,
   X,
   Trash2,
   UsersRound,
@@ -45,6 +46,9 @@ import {
   matchesAssignmentPreviewRequestKey,
   validateAssignmentPreviewResponse,
 } from "./assignmentPreview";
+
+const SESSION_STORAGE_KEY = "rallyon_create_free_game_state";
+const SESSION_STORAGE_VERSION = 1;
 
 type LocalParticipant = {
   participantId: number;
@@ -86,6 +90,19 @@ type ParticipantSummaryGroup =
       key: string;
       participant: LocalParticipant;
     };
+
+type SavedDraftState = {
+  version: number;
+  step: number;
+  gameName: string;
+  date: string;
+  location: string;
+  courts: number;
+  roundCount: number;
+  rounds: LocalRound[];
+  participants: LocalParticipant[];
+  partnerLinks: PartnerLinks;
+};
 
 const AGE_GROUP_OPTIONS = ["10s", "20s", "30s", "40s", "50s", "60s"];
 const LEVEL_OPTIONS: Grade[] = ["ROOKIE", "D", "C", "B", "A", "S", "SS"];
@@ -131,10 +148,53 @@ const AGE_GROUP_SELECT_OPTIONS = AGE_GROUP_OPTIONS.map((ageGroup) => ({
   value: ageGroup,
   label: AGE_GROUP_LABELS[ageGroup as keyof typeof AGE_GROUP_LABELS] ?? ageGroup,
 }));
+const AGE_GROUP_COMPACT_SELECT_OPTIONS = AGE_GROUP_OPTIONS.map((ageGroup) => ({
+  value: ageGroup,
+  label: ageGroup.replace("s", ""),
+}));
 const LEVEL_SELECT_OPTIONS = LEVEL_OPTIONS.map((level) => ({
   value: level,
   label: level,
 }));
+const LEVEL_COMPACT_LABELS = {
+  ROOKIE: "R",
+  D: "D",
+  C: "C",
+  B: "B",
+  A: "A",
+  S: "S",
+  SS: "SS",
+} as const;
+const LEVEL_COMPACT_SELECT_OPTIONS = LEVEL_OPTIONS.map((level) => ({
+  value: level,
+  label: LEVEL_COMPACT_LABELS[level],
+}));
+
+function StepSectionHeader({
+  title,
+  description,
+  meta,
+}: {
+  title: string;
+  description: string;
+  meta?: ReactNode;
+}) {
+  return (
+    <div className="mb-4 flex flex-col gap-3 border-b-2 border-slate-100 pb-3 md:mb-5 md:flex-row md:items-start md:justify-between">
+      <div className="min-w-0 flex-1">
+        <h2 className="font-display text-2xl font-bold uppercase text-slate-900 md:text-[1.75rem]">
+          {title}
+        </h2>
+        <p className="mt-1 text-sm font-mono text-slate-500">{description}</p>
+      </div>
+      {meta ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
+          {meta}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function buildCourts(count: number) {
   return Array.from({ length: count }, (_, index) => ({
@@ -183,6 +243,212 @@ function recalculateAssignments(
   });
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isValidLocalParticipant(value: unknown): value is LocalParticipant {
+  return (
+    isObjectRecord(value) &&
+    isPositiveInteger(value.participantId) &&
+    typeof value.name === "string" &&
+    (value.gender === "M" || value.gender === "F") &&
+    typeof value.ageGroup === "string" &&
+    AGE_GROUP_OPTIONS.includes(value.ageGroup) &&
+    typeof value.level === "string" &&
+    LEVEL_OPTIONS.includes(value.level as Grade) &&
+    typeof value.gamesAssigned === "number"
+  );
+}
+
+function toCanonicalParticipants(value: unknown): LocalParticipant[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const participants = value.filter(isValidLocalParticipant).map((participant) => ({
+    participantId: participant.participantId,
+    name: participant.name,
+    gender: participant.gender,
+    ageGroup: participant.ageGroup,
+    level: participant.level,
+    gamesAssigned: 0,
+  }));
+
+  if (participants.length !== value.length) {
+    return null;
+  }
+
+  const uniqueIds = new Set(participants.map((participant) => participant.participantId));
+  return uniqueIds.size === participants.length ? participants : null;
+}
+
+function toCanonicalRounds(
+  value: unknown,
+  participantById: Map<number, LocalParticipant>
+): LocalRound[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+
+  const rounds = value.map((roundValue) => {
+    if (!isObjectRecord(roundValue) || typeof roundValue.id !== "string") {
+      return null;
+    }
+
+    const rawCourts = roundValue.courts;
+    if (!Array.isArray(rawCourts) || rawCourts.length === 0) {
+      return null;
+    }
+
+    const courts = rawCourts.map((courtValue) => {
+      if (!isObjectRecord(courtValue) || typeof courtValue.id !== "string") {
+        return null;
+      }
+
+      const rawSlots = courtValue.assignedParticipants;
+      if (!Array.isArray(rawSlots) || rawSlots.length !== 4) {
+        return null;
+      }
+
+      const assignedParticipants = rawSlots.map((slotValue) => {
+        if (slotValue === null) {
+          return null;
+        }
+
+        if (!isObjectRecord(slotValue)) {
+          return undefined;
+        }
+
+        const participantId = slotValue.participantId;
+        if (!isPositiveInteger(participantId)) {
+          return undefined;
+        }
+
+        return participantById.get(participantId) ?? undefined;
+      });
+
+      if (assignedParticipants.some((slot) => slot === undefined)) {
+        return null;
+      }
+
+      return {
+        id: courtValue.id,
+        assignedParticipants: assignedParticipants as Array<LocalParticipant | null>,
+      };
+    });
+
+    if (courts.some((court) => court === null)) {
+      return null;
+    }
+
+    return {
+      id: roundValue.id,
+      courts: courts as LocalCourt[],
+    };
+  });
+
+  return rounds.some((round) => round === null) ? null : (rounds as LocalRound[]);
+}
+
+function toCanonicalPartnerLinks(
+  value: unknown,
+  participantById: Map<number, LocalParticipant>
+): PartnerLinks | null {
+  if (!isObjectRecord(value)) {
+    return null;
+  }
+
+  const nextLinks: PartnerLinks = {};
+
+  for (const [rawFromId, rawToId] of Object.entries(value)) {
+    const fromId = Number(rawFromId);
+    if (!isPositiveInteger(fromId) || !isPositiveInteger(rawToId)) {
+      return null;
+    }
+
+    const toId = rawToId;
+    if (!participantById.has(fromId) || !participantById.has(toId) || fromId === toId) {
+      return null;
+    }
+
+    nextLinks[fromId] = toId;
+  }
+
+  for (const [rawFromId, toId] of Object.entries(nextLinks)) {
+    const fromId = Number(rawFromId);
+    if (nextLinks[toId] !== fromId) {
+      return null;
+    }
+  }
+
+  return nextLinks;
+}
+
+function parseSavedDraftState(value: unknown): SavedDraftState | null {
+  if (!isObjectRecord(value) || value.version !== SESSION_STORAGE_VERSION) {
+    return null;
+  }
+
+  const step = value.step;
+  const gameName = value.gameName;
+  const date = value.date;
+  const location = value.location;
+  const courts = value.courts;
+  const roundCount = value.roundCount;
+  const participants = toCanonicalParticipants(value.participants);
+  if (!participants) {
+    return null;
+  }
+
+  const participantById = new Map(
+    participants.map((participant) => [participant.participantId, participant])
+  );
+  const rounds = toCanonicalRounds(value.rounds, participantById);
+  const partnerLinks = toCanonicalPartnerLinks(value.partnerLinks, participantById);
+
+  if (
+    !rounds ||
+    !partnerLinks ||
+    !isPositiveInteger(step) ||
+    step > 3 ||
+    typeof gameName !== "string" ||
+    typeof date !== "string" ||
+    typeof location !== "string" ||
+    !isPositiveInteger(courts) ||
+    !isPositiveInteger(roundCount)
+  ) {
+    return null;
+  }
+
+  const hydratedParticipants = recalculateAssignments(participants, rounds);
+  const hydratedCourts =
+    step === 1
+      ? courts
+      : Math.max(
+          1,
+          rounds.reduce((maxCourtCount, round) => Math.max(maxCourtCount, round.courts.length), 0)
+        );
+  const hydratedRoundCount = step === 1 ? roundCount : rounds.length;
+
+  return {
+    version: SESSION_STORAGE_VERSION,
+    step,
+    gameName,
+    date,
+    location,
+    courts: hydratedCourts,
+    roundCount: hydratedRoundCount,
+    rounds,
+    participants: hydratedParticipants,
+    partnerLinks,
+  };
+}
+
 function isFutureDateTime(value: string) {
   if (!value) {
     return false;
@@ -198,6 +464,14 @@ function getGenderLabel(gender: "M" | "F") {
 
 function getAgeGroupLabel(ageGroup: string) {
   return AGE_GROUP_LABELS[ageGroup as keyof typeof AGE_GROUP_LABELS] ?? ageGroup;
+}
+
+function getAgeGroupCompactLabel(ageGroup: string) {
+  return ageGroup.replace("s", "");
+}
+
+function getLevelCompactLabel(level: Grade) {
+  return LEVEL_COMPACT_LABELS[level] ?? level;
 }
 
 function detachPartnerLinks(partnerLinks: PartnerLinks, participantId: number): PartnerLinks {
@@ -412,6 +686,7 @@ export default function CreateFreeGamePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitErrorField, setSubmitErrorField] = useState<StepValidationField>(null);
+  const [isDraftStateHydrated, setIsDraftStateHydrated] = useState(false);
   const [partnerLinks, setPartnerLinks] = useState<PartnerLinks>({});
   const [partnerSelectionSourceId, setPartnerSelectionSourceId] = useState<number | null>(null);
   const [aiPartnerPolicy, setAiPartnerPolicy] =
@@ -422,11 +697,14 @@ export default function CreateFreeGamePage() {
   const [isParticipantSummaryCollapsed, setIsParticipantSummaryCollapsed] = useState(true);
   const [lastAddedParticipantId, setLastAddedParticipantId] = useState<number | null>(null);
   const isAssignmentEditingLocked = isGeneratingAiPreview;
+  const isCreateOverlayOpen = isLocationModalOpen || isParticipantAssignModalOpen;
   const isParticipantNameComposingRef = useRef(false);
   const submitParticipantAfterCompositionRef = useRef(false);
   const skipNextParticipantEnterRef = useRef(false);
-  const participantListRef = useRef<HTMLDivElement | null>(null);
-  const participantRowRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const participantScrollBodyRef = useRef<HTMLDivElement | null>(null);
+  const participantListViewportRef = useRef<HTMLDivElement | null>(null);
+  const participantMobileRowRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const participantDesktopRowRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const nextParticipantIdRef = useRef(1);
   const activePreviewJobIdRef = useRef<string | null>(null);
   const previewPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -444,7 +722,77 @@ export default function CreateFreeGamePage() {
   }, [isLoading, isLoggedIn]);
 
   useEffect(() => {
-    if (step !== 1) {
+    try {
+      const saved = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (saved) {
+        const parsed = parseSavedDraftState(JSON.parse(saved));
+
+        if (!parsed) {
+          sessionStorage.removeItem(SESSION_STORAGE_KEY);
+        } else {
+          setStep(parsed.step);
+          setGameName(parsed.gameName);
+          setDate(parsed.date);
+          setLocation(parsed.location);
+          setCourts(parsed.courts);
+          setRoundCount(parsed.roundCount);
+          setRounds(parsed.rounds);
+          setParticipants(parsed.participants);
+          setPartnerLinks(parsed.partnerLinks);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to parse form state from session storage", error);
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    } finally {
+      setIsDraftStateHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isDraftStateHydrated) {
+      return;
+    }
+
+    try {
+      if (step === 4) {
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+        return;
+      }
+
+      sessionStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify({
+          version: SESSION_STORAGE_VERSION,
+          step,
+          gameName,
+          date,
+          location,
+          courts,
+          roundCount,
+          rounds,
+          participants,
+          partnerLinks,
+        })
+      );
+    } catch (error) {
+      console.error("Failed to save form state to session storage", error);
+    }
+  }, [
+    step,
+    gameName,
+    date,
+    location,
+    courts,
+    roundCount,
+    rounds,
+    participants,
+    partnerLinks,
+    isDraftStateHydrated,
+  ]);
+
+  useEffect(() => {
+    if (!isCreateOverlayOpen) {
       return;
     }
 
@@ -464,7 +812,7 @@ export default function CreateFreeGamePage() {
       document.documentElement.style.overscrollBehavior = previousHtmlOverscroll;
       document.body.style.overscrollBehavior = previousBodyOverscroll;
     };
-  }, [step]);
+  }, [isCreateOverlayOpen]);
 
   useEffect(() => {
     roundsRef.current = rounds;
@@ -509,8 +857,20 @@ export default function CreateFreeGamePage() {
       return;
     }
 
-    const containerElement = participantListRef.current;
-    const rowElement = participantRowRefs.current[lastAddedParticipantId];
+    const mobileRowElement = participantMobileRowRefs.current[lastAddedParticipantId];
+    const desktopRowElement = participantDesktopRowRefs.current[lastAddedParticipantId];
+    const rowElement =
+      mobileRowElement?.offsetParent !== null
+        ? mobileRowElement
+        : desktopRowElement?.offsetParent !== null
+          ? desktopRowElement
+          : null;
+    const containerElement =
+      mobileRowElement?.offsetParent !== null
+        ? participantScrollBodyRef.current
+        : desktopRowElement?.offsetParent !== null
+          ? participantListViewportRef.current
+          : participantScrollBodyRef.current;
     if (containerElement && rowElement && containerElement.scrollHeight > containerElement.clientHeight) {
       const containerRect = containerElement.getBoundingClientRect();
       const rowRect = rowElement.getBoundingClientRect();
@@ -1153,6 +1513,7 @@ export default function CreateFreeGamePage() {
         pushRecentGameId(gameId);
         setCreatedGameId(gameId);
         setStep(4);
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
       } catch (error) {
         setSubmitError(
           getUserFacingErrorMessage(
@@ -1365,16 +1726,110 @@ export default function CreateFreeGamePage() {
         },
   ];
   const canClearAllAssignments = !isGeneratingAiPreview && hasAssignedParticipants(rounds);
-  const isStepOne = step === 1;
-  const pageContainerClassName = isStepOne
-    ? "container mx-auto flex h-full min-h-0 flex-1 flex-col overflow-hidden px-4 pt-4 pb-2 md:px-8 md:pt-6 md:pb-4 lg:pt-7 lg:pb-5 max-w-5xl"
-    : "container mx-auto max-w-5xl px-4 pt-7 pb-5 md:px-8 md:pt-7 md:pb-6 lg:pt-8 lg:pb-7";
-  const cardClassName = isStepOne
-    ? "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[4px_4px_0px_0px_rgba(15,23,42,1)]"
-    : "relative flex min-h-[500px] flex-col overflow-visible rounded-sm border-2 border-slate-900 bg-white shadow-[4px_4px_0px_0px_rgba(15,23,42,1)]";
-  const contentAreaClassName = isStepOne
-    ? "z-30 flex min-h-0 flex-1 flex-col px-4 pt-6 pb-2 md:px-8 md:pt-7 md:pb-3"
-    : "z-30 flex-1 px-4 py-2 md:px-8 md:py-4";
+  const stepHeaderMeta =
+    step === 3 ? (
+      <div className="toolbar-scroll-hidden flex w-full items-center gap-2 overflow-x-auto pb-1 md:w-auto md:justify-end md:overflow-visible md:pb-0">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          {aiAssignmentIndicators.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <Tooltip
+                key={item.key}
+                message={`${item.label}: ${item.value}`}
+                position="top"
+              >
+                {item.interactive ? (
+                  <button
+                    type="button"
+                    aria-label={`${item.label}: ${item.value}`}
+                    disabled={isAssignmentEditingLocked}
+                    onClick={item.onClick ?? undefined}
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors sm:h-9 sm:w-9 ${
+                      isAssignmentEditingLocked
+                        ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 shadow-none"
+                        : item.className
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <div
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors sm:h-9 sm:w-9 ${item.className}`}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </div>
+                )}
+              </Tooltip>
+            );
+          })}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!canClearAllAssignments}
+            onClick={handleClearAllAssignments}
+            className="h-8 shrink-0 rounded-none border-2 border-slate-300 bg-white px-2.5 font-mono text-[9px] uppercase tracking-[0.14em] text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:h-9 sm:px-3 sm:text-[10px] sm:tracking-widest"
+          >
+            <X className="mr-1 h-3 w-3 sm:mr-2" />
+            <span className="sm:hidden">초기화</span>
+            <span className="hidden sm:inline">전체 배정 초기화</span>
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={isGeneratingAiPreview}
+            onClick={() => void handleGenerateAiPreview()}
+            className="h-8 shrink-0 rounded-none bg-emerald-500 px-2.5 font-mono text-[9px] uppercase tracking-[0.14em] text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-emerald-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:h-9 sm:px-3 sm:text-[10px] sm:tracking-widest"
+          >
+            {isGeneratingAiPreview ? (
+              <LoaderCircle className="mr-1 h-3 w-3 animate-spin sm:mr-2" />
+            ) : (
+              <Activity className="mr-1 h-3 w-3 sm:mr-2" />
+            )}
+            <span className="sm:hidden">
+              {isGeneratingAiPreview ? "배정 중" : "AI 배정"}
+            </span>
+            <span className="hidden sm:inline">
+              {isGeneratingAiPreview ? "AI 배정 중..." : "AI 자동 배정"}
+            </span>
+          </Button>
+        </div>
+      </div>
+    ) : undefined;
+  const currentStepHeader =
+    step === 1
+      ? {
+          title: "자유게임 설정",
+          description: "자유게임에 필요한 기본 정보를 입력하세요.",
+          meta: undefined,
+        }
+      : step === 2
+        ? {
+            title: "참가자 구성",
+            description: "참가자를 추가하고 등급을 지정해주세요.",
+            meta: undefined,
+          }
+        : step === 3
+          ? {
+              title: "코트 배정",
+              description: "배정할 코트 슬롯을 먼저 선택한 뒤 참가자를 등록하세요.",
+              meta: stepHeaderMeta,
+            }
+          : null;
+  const isContentDrivenStep = step === 1 || step === 2;
+  const pageContainerClassName =
+    "container mx-auto flex h-full min-h-0 max-w-5xl flex-1 flex-col overflow-hidden px-4 pt-4 pb-2 md:px-8 md:pt-6 md:pb-4 lg:pt-7 lg:pb-5";
+  const cardClassName =
+    `relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] ${
+      isContentDrivenStep ? "md:flex-none" : ""
+    }`;
+  const contentAreaClassName =
+    `z-30 flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 md:px-8 md:py-5 lg:py-6 ${
+      isContentDrivenStep ? "md:flex-none md:overflow-visible" : ""
+    }`;
 
   return (
     <div className={pageContainerClassName}>
@@ -1431,6 +1886,13 @@ export default function CreateFreeGamePage() {
         )}
 
         <div className={contentAreaClassName}>
+          {currentStepHeader ? (
+            <StepSectionHeader
+              title={currentStepHeader.title}
+              description={currentStepHeader.description}
+              meta={currentStepHeader.meta}
+            />
+          ) : null}
           <AnimatePresence mode="wait">
             {step === 1 && (
               <motion.div
@@ -1439,18 +1901,15 @@ export default function CreateFreeGamePage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
-                className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col"
+                className="flex min-h-0 flex-1 flex-col md:min-h-fit md:flex-none"
               >
-                <div className="mb-4 border-b-2 border-slate-100 pb-2">
-                  <h2 className="font-display text-2xl font-bold text-slate-900">
-                    자유게임 설정
-                  </h2>
-                  <p className="mt-1 text-sm font-mono text-slate-500">
-                    자유게임에 필요한 기본 정보를 입력하세요.
-                  </p>
-                </div>
-
-                <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+                <div
+                  className="wizard-scroll create-step-shell min-h-0 flex-1 pr-0.5 md:min-h-fit md:flex-none md:overflow-visible md:pr-0"
+                  tabIndex={0}
+                  role="region"
+                  aria-label="자유게임 설정 본문"
+                >
+                  <div className="grid gap-3 md:gap-4">
                   <div className="space-y-2">
                     <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
                       세션 이름
@@ -1472,7 +1931,7 @@ export default function CreateFreeGamePage() {
                     />
                   </div>
 
-                  <div className="grid gap-2.5 sm:grid-cols-2">
+                  <div className="create-step-split-grid grid gap-3">
                     <div className="space-y-2">
                       <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
                         날짜 및 시간
@@ -1491,7 +1950,7 @@ export default function CreateFreeGamePage() {
                       <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
                         장소
                       </label>
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         <div className="flex gap-2">
                           <button
                             type="button"
@@ -1532,22 +1991,21 @@ export default function CreateFreeGamePage() {
                             {locationSearchError}
                           </div>
                         ) : null}
-
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 border-t-2 border-slate-100 pt-2.5 sm:gap-4">
-                    <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2 border-t-2 border-slate-100 pt-3 md:gap-4">
+                    <div className="min-w-0 space-y-2">
                       <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
-                        활성 코트
+                        코트
                       </label>
-                      <div className="flex items-center gap-2.5 sm:gap-3">
+                      <div className="flex items-center gap-1.5 sm:gap-2.5">
                         <Button
                           variant="outline"
                           size="icon"
                           disabled={isGeneratingAiPreview}
-                          className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-11 sm:w-11"
+                          className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
                           onClick={() => {
                             if (isGeneratingAiPreview) {
                               return;
@@ -1557,14 +2015,14 @@ export default function CreateFreeGamePage() {
                         >
                           -
                         </Button>
-                        <div className="flex h-10 w-[56px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-lg font-bold text-white sm:h-11 sm:w-16 sm:text-xl">
+                        <div className="flex h-9 w-[48px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-base font-bold text-white sm:h-10 sm:w-[56px] sm:text-lg">
                           {String(courts).padStart(2, "0")}
                         </div>
                         <Button
                           variant="outline"
                           size="icon"
                           disabled={isGeneratingAiPreview}
-                          className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-11 sm:w-11"
+                          className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
                           onClick={() => {
                             if (isGeneratingAiPreview) {
                               return;
@@ -1577,16 +2035,16 @@ export default function CreateFreeGamePage() {
                       </div>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="min-w-0 space-y-2">
                       <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
-                        활성 라운드
+                        라운드
                       </label>
-                      <div className="flex items-center gap-2.5 sm:gap-3">
+                      <div className="flex items-center gap-1.5 sm:gap-2.5">
                         <Button
                           variant="outline"
                           size="icon"
                           disabled={isGeneratingAiPreview}
-                          className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-11 sm:w-11"
+                          className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
                           onClick={() => {
                             if (isGeneratingAiPreview) {
                               return;
@@ -1596,14 +2054,14 @@ export default function CreateFreeGamePage() {
                         >
                           -
                         </Button>
-                        <div className="flex h-10 w-[56px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-lg font-bold text-white sm:h-11 sm:w-16 sm:text-xl">
+                        <div className="flex h-9 w-[48px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-base font-bold text-white sm:h-10 sm:w-[56px] sm:text-lg">
                           {String(roundCount).padStart(2, "0")}
                         </div>
                         <Button
                           variant="outline"
                           size="icon"
                           disabled={isGeneratingAiPreview}
-                          className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-11 sm:w-11"
+                          className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
                           onClick={() => {
                             if (isGeneratingAiPreview) {
                               return;
@@ -1616,6 +2074,7 @@ export default function CreateFreeGamePage() {
                       </div>
                     </div>
                   </div>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -1627,200 +2086,333 @@ export default function CreateFreeGamePage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
-                className="space-y-5"
+                className="flex min-h-0 flex-1 flex-col md:min-h-fit md:flex-none"
               >
-                <div className="mb-3 flex flex-col justify-between gap-3 border-b-2 border-slate-100 pb-2 sm:flex-row sm:items-end">
-                  <div>
-                    <h2 className="font-display text-2xl font-bold uppercase text-slate-900">
-                      참가자 구성
-                    </h2>
-                    <p className="mt-1 text-sm font-mono text-slate-500">
-                      참가자를 추가하고 등급을 지정해주세요.
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <span className="mb-1 text-[10px] font-mono uppercase tracking-widest text-slate-400">
-                      총 인원
-                    </span>
-                    <div className="font-display text-3xl leading-none font-bold text-teal-600">
-                      {String(participants.length).padStart(2, "0")}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <div className="min-w-[220px] flex-[1.8]">
-                    <input
-                      type="text"
-                      placeholder="이름"
-                      disabled={isAssignmentEditingLocked}
-                      className={`h-[50px] w-full rounded-none border-2 bg-slate-50 px-4 text-sm font-medium transition-colors focus:bg-white focus:outline-none ${
-                        submitErrorField === "participants"
-                          ? "border-red-300 focus:border-red-500"
-                          : "border-slate-200 focus:border-slate-900"
-                      }`}
-                      value={newParticipant.name}
-                      onChange={(event) => {
-                        if (submitErrorField === "participants") {
-                          setSubmitError("");
-                          setSubmitErrorField(null);
-                        }
-
-                        setNewParticipant((prev) => ({
-                          ...prev,
-                          name: event.target.value,
-                        }));
-                      }}
-                      onCompositionStart={() => {
-                        isParticipantNameComposingRef.current = true;
-                        submitParticipantAfterCompositionRef.current = false;
-                        skipNextParticipantEnterRef.current = false;
-                      }}
-                      onCompositionEnd={(event) => {
-                        const composedName = event.currentTarget.value;
-
-                        isParticipantNameComposingRef.current = false;
-                        setNewParticipant((prev) => ({
-                          ...prev,
-                          name: composedName,
-                        }));
-
-                        if (submitParticipantAfterCompositionRef.current) {
-                          submitParticipantAfterCompositionRef.current = false;
-                          skipNextParticipantEnterRef.current = true;
-                          requestAnimationFrame(() => {
-                            addParticipant(composedName);
-                          });
-                        }
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter") {
-                          return;
-                        }
-
-                        if (skipNextParticipantEnterRef.current) {
-                          event.preventDefault();
-                          skipNextParticipantEnterRef.current = false;
-                          return;
-                        }
-
-                        const nativeEvent = event.nativeEvent as KeyboardEvent & {
-                          isComposing?: boolean;
-                          keyCode?: number;
-                        };
-                        const isComposing =
-                          isParticipantNameComposingRef.current ||
-                          nativeEvent.isComposing === true ||
-                          nativeEvent.keyCode === 229;
-
-                        event.preventDefault();
-
-                        if (isComposing) {
-                          submitParticipantAfterCompositionRef.current = true;
-                          return;
-                        }
-
-                        addParticipant();
-                      }}
-                    />
-                  </div>
-                  <div className="w-[88px] shrink-0">
-                    <Select
-                      variant="brutalist"
-                      value={newParticipant.gender}
-                      options={[...GENDER_SELECT_OPTIONS]}
-                      disabled={isAssignmentEditingLocked}
-                      onChange={(event) =>
-                        setNewParticipant((prev) => ({
-                          ...prev,
-                          gender: event as "M" | "F",
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="w-[104px] shrink-0">
-                    <Select
-                      variant="brutalist"
-                      value={newParticipant.ageGroup}
-                      options={AGE_GROUP_SELECT_OPTIONS}
-                      disabled={isAssignmentEditingLocked}
-                      onChange={(event) =>
-                        setNewParticipant((prev) => ({
-                          ...prev,
-                          ageGroup: event,
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="w-[104px] shrink-0">
-                    <Select
-                      variant="brutalist"
-                      value={newParticipant.level}
-                      options={LEVEL_SELECT_OPTIONS}
-                      disabled={isAssignmentEditingLocked}
-                      onChange={(event) =>
-                        setNewParticipant((prev) => ({
-                          ...prev,
-                          level: event as Grade,
-                        }))
-                      }
-                    />
-                  </div>
-                  <Button
-                    disabled={isAssignmentEditingLocked}
-                    onClick={() => addParticipant()}
-                    className="h-[50px] w-full rounded-none bg-slate-900 px-6 text-xs font-bold uppercase tracking-widest text-white hover:bg-slate-800 sm:w-[96px]"
-                  >
-                    추가
-                  </Button>
-                </div>
-
                 <div
-                  className={`border-2 bg-white ${
-                    submitErrorField === "participants"
-                      ? "border-red-300"
-                      : "border-slate-200"
-                  }`}
+                  ref={participantScrollBodyRef}
+                  className="wizard-scroll create-step-shell min-h-0 flex-1 pr-0.5 md:min-h-fit md:flex-none md:overflow-visible md:pr-0"
+                  tabIndex={0}
+                  role="region"
+                  aria-label="참가자 구성 본문"
                 >
-                  {partnerSelectionSource ? (
-                    <div className="flex items-start justify-between gap-4 border-b-2 border-violet-200 bg-violet-50 px-4 py-3.5">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700">
-                          파트너 선택 모드
+                  <div className="space-y-4">
+                    <div className="md:hidden">
+                      <div className="grid grid-cols-[minmax(0,1fr)_44px_52px_44px_44px] gap-1">
+                        <input
+                          type="text"
+                          placeholder="이름"
+                          disabled={isAssignmentEditingLocked}
+                          className={`h-11 min-w-0 w-full rounded-none border-2 bg-slate-50 px-2.5 text-[13px] font-medium transition-colors focus:bg-white focus:outline-none ${
+                            submitErrorField === "participants"
+                              ? "border-red-300 focus:border-red-500"
+                              : "border-slate-200 focus:border-slate-900"
+                          }`}
+                          value={newParticipant.name}
+                          onChange={(event) => {
+                            if (submitErrorField === "participants") {
+                              setSubmitError("");
+                              setSubmitErrorField(null);
+                            }
+
+                            setNewParticipant((prev) => ({
+                              ...prev,
+                              name: event.target.value,
+                            }));
+                          }}
+                          onCompositionStart={() => {
+                            isParticipantNameComposingRef.current = true;
+                            submitParticipantAfterCompositionRef.current = false;
+                            skipNextParticipantEnterRef.current = false;
+                          }}
+                          onCompositionEnd={(event) => {
+                            const composedName = event.currentTarget.value;
+
+                            isParticipantNameComposingRef.current = false;
+                            setNewParticipant((prev) => ({
+                              ...prev,
+                              name: composedName,
+                            }));
+
+                            if (submitParticipantAfterCompositionRef.current) {
+                              submitParticipantAfterCompositionRef.current = false;
+                              skipNextParticipantEnterRef.current = true;
+                              requestAnimationFrame(() => {
+                                addParticipant(composedName);
+                              });
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter") {
+                              return;
+                            }
+
+                            if (skipNextParticipantEnterRef.current) {
+                              event.preventDefault();
+                              skipNextParticipantEnterRef.current = false;
+                              return;
+                            }
+
+                            const nativeEvent = event.nativeEvent as KeyboardEvent & {
+                              isComposing?: boolean;
+                              keyCode?: number;
+                            };
+                            const isComposing =
+                              isParticipantNameComposingRef.current ||
+                              nativeEvent.isComposing === true ||
+                              nativeEvent.keyCode === 229;
+
+                            event.preventDefault();
+
+                            if (isComposing) {
+                              submitParticipantAfterCompositionRef.current = true;
+                              return;
+                            }
+
+                            addParticipant();
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <Select
+                            variant="brutalist"
+                            size="compact"
+                            value={newParticipant.gender}
+                            options={[...GENDER_SELECT_OPTIONS]}
+                            disabled={isAssignmentEditingLocked}
+                            onChange={(event) =>
+                              setNewParticipant((prev) => ({
+                                ...prev,
+                                gender: event as "M" | "F",
+                              }))
+                            }
+                          />
                         </div>
-                        <div className="mt-1.5 flex items-center gap-2">
-                          <span className="border border-violet-200 bg-white px-2 py-1 text-xs font-bold text-slate-900">
-                            {partnerSelectionSource.name}
-                          </span>
-                          <span className="truncate text-sm font-medium text-slate-700">
-                            의 파트너를 선택하세요.
-                          </span>
+                        <div className="min-w-0">
+                          <Select
+                            variant="brutalist"
+                            size="compact"
+                            value={newParticipant.ageGroup}
+                            options={AGE_GROUP_COMPACT_SELECT_OPTIONS}
+                            disabled={isAssignmentEditingLocked}
+                            onChange={(event) =>
+                              setNewParticipant((prev) => ({
+                                ...prev,
+                                ageGroup: event,
+                              }))
+                            }
+                          />
                         </div>
+                        <div className="min-w-0">
+                          <Select
+                            variant="brutalist"
+                            size="compact"
+                            value={newParticipant.level}
+                            options={LEVEL_COMPACT_SELECT_OPTIONS}
+                            disabled={isAssignmentEditingLocked}
+                            onChange={(event) =>
+                              setNewParticipant((prev) => ({
+                                ...prev,
+                                level: event as Grade,
+                              }))
+                            }
+                          />
+                        </div>
+                        <Button
+                          disabled={isAssignmentEditingLocked}
+                          onClick={() => addParticipant()}
+                          className="h-11 w-full rounded-none border-2 border-slate-900 bg-slate-900 p-0 text-white shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-slate-800 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none"
+                          aria-label="참가자 추가"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="hidden items-center gap-2 md:flex md:flex-wrap">
+                      <div className="min-w-0 flex-1 md:min-w-[220px] md:flex-[1.8]">
+                        <input
+                          type="text"
+                          placeholder="이름"
+                          disabled={isAssignmentEditingLocked}
+                          className={`h-[50px] w-full rounded-none border-2 bg-slate-50 px-4 text-sm font-medium transition-colors focus:bg-white focus:outline-none ${
+                            submitErrorField === "participants"
+                              ? "border-red-300 focus:border-red-500"
+                              : "border-slate-200 focus:border-slate-900"
+                          }`}
+                          value={newParticipant.name}
+                          onChange={(event) => {
+                            if (submitErrorField === "participants") {
+                              setSubmitError("");
+                              setSubmitErrorField(null);
+                            }
+
+                            setNewParticipant((prev) => ({
+                              ...prev,
+                              name: event.target.value,
+                            }));
+                          }}
+                          onCompositionStart={() => {
+                            isParticipantNameComposingRef.current = true;
+                            submitParticipantAfterCompositionRef.current = false;
+                            skipNextParticipantEnterRef.current = false;
+                          }}
+                          onCompositionEnd={(event) => {
+                            const composedName = event.currentTarget.value;
+
+                            isParticipantNameComposingRef.current = false;
+                            setNewParticipant((prev) => ({
+                              ...prev,
+                              name: composedName,
+                            }));
+
+                            if (submitParticipantAfterCompositionRef.current) {
+                              submitParticipantAfterCompositionRef.current = false;
+                              skipNextParticipantEnterRef.current = true;
+                              requestAnimationFrame(() => {
+                                addParticipant(composedName);
+                              });
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter") {
+                              return;
+                            }
+
+                            if (skipNextParticipantEnterRef.current) {
+                              event.preventDefault();
+                              skipNextParticipantEnterRef.current = false;
+                              return;
+                            }
+
+                            const nativeEvent = event.nativeEvent as KeyboardEvent & {
+                              isComposing?: boolean;
+                              keyCode?: number;
+                            };
+                            const isComposing =
+                              isParticipantNameComposingRef.current ||
+                              nativeEvent.isComposing === true ||
+                              nativeEvent.keyCode === 229;
+
+                            event.preventDefault();
+
+                            if (isComposing) {
+                              submitParticipantAfterCompositionRef.current = true;
+                              return;
+                            }
+
+                            addParticipant();
+                          }}
+                        />
+                      </div>
+                      <div className="w-[88px] shrink-0">
+                        <Select
+                          variant="brutalist"
+                          value={newParticipant.gender}
+                          options={[...GENDER_SELECT_OPTIONS]}
+                          disabled={isAssignmentEditingLocked}
+                          onChange={(event) =>
+                            setNewParticipant((prev) => ({
+                              ...prev,
+                              gender: event as "M" | "F",
+                            }))
+                          }
+                        />
+                        <Select
+                          variant="brutalist"
+                          value={newParticipant.ageGroup}
+                          options={AGE_GROUP_SELECT_OPTIONS}
+                          disabled={isAssignmentEditingLocked}
+                          onChange={(event) =>
+                            setNewParticipant((prev) => ({
+                              ...prev,
+                              ageGroup: event,
+                            }))
+                          }
+                        />
+                        <Select
+                          variant="brutalist"
+                          value={newParticipant.level}
+                          options={LEVEL_SELECT_OPTIONS}
+                          disabled={isAssignmentEditingLocked}
+                          onChange={(event) =>
+                            setNewParticipant((prev) => ({
+                              ...prev,
+                              level: event as Grade,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="w-[104px] shrink-0">
+                        <Select
+                          variant="brutalist"
+                          value={newParticipant.ageGroup}
+                          options={AGE_GROUP_SELECT_OPTIONS}
+                          disabled={isAssignmentEditingLocked}
+                          onChange={(event) =>
+                            setNewParticipant((prev) => ({
+                              ...prev,
+                              ageGroup: event,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="w-[104px] shrink-0">
+                        <Select
+                          variant="brutalist"
+                          value={newParticipant.level}
+                          options={LEVEL_SELECT_OPTIONS}
+                          disabled={isAssignmentEditingLocked}
+                          onChange={(event) =>
+                            setNewParticipant((prev) => ({
+                              ...prev,
+                              level: event as Grade,
+                            }))
+                          }
+                        />
                       </div>
                       <Button
-                        type="button"
-                        variant="outline"
                         disabled={isAssignmentEditingLocked}
-                        className="h-9 rounded-none border-2 border-violet-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100"
-                        onClick={() => setPartnerSelectionSourceId(null)}
+                        onClick={() => addParticipant()}
+                        className="h-[50px] w-[96px] rounded-none bg-slate-900 px-6 text-xs font-bold uppercase tracking-widest text-white hover:bg-slate-800"
                       >
-                        취소
+                        추가
                       </Button>
                     </div>
-                  ) : null}
 
-                  <div className="overflow-x-auto">
-                    <div className="min-w-[860px]">
-                      <div className="grid grid-cols-[56px_minmax(0,2fr)_72px_88px_84px_minmax(0,1.5fr)_48px] gap-4 border-b-2 border-slate-200 bg-slate-50 px-4 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                        <div className="text-center">ID</div>
-                        <div className="text-center">이름</div>
-                        <div className="text-center">성별</div>
-                        <div className="text-center">연령</div>
-                        <div className="text-center">등급</div>
-                        <div className="text-center">파트너</div>
-                        <div className="text-center">관리</div>
-                      </div>
-                      <div ref={participantListRef} className="max-h-[320px] overflow-y-auto bg-white">
+                    <div
+                      className={`border-2 bg-white ${
+                        submitErrorField === "participants"
+                          ? "border-red-300"
+                          : "border-slate-200"
+                      }`}
+                    >
+                      {partnerSelectionSource ? (
+                        <div className="flex items-start justify-between gap-4 border-b-2 border-violet-200 bg-violet-50 px-3 py-3 md:px-4 md:py-3.5">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700">
+                              파트너 선택 모드
+                            </div>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                              <span className="border border-violet-200 bg-white px-2 py-1 text-xs font-bold text-slate-900">
+                                {partnerSelectionSource.name}
+                              </span>
+                              <span className="truncate text-sm font-medium text-slate-700">
+                                의 파트너를 선택하세요.
+                              </span>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={isAssignmentEditingLocked}
+                            className="h-9 rounded-none border-2 border-violet-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100"
+                            onClick={() => setPartnerSelectionSourceId(null)}
+                          >
+                            취소
+                          </Button>
+                        </div>
+                      ) : null}
+
+                      <div className="md:hidden">
                         {participants.map((participant, index) => {
                           const partner = partnerLinks[participant.participantId]
                             ? participantById.get(partnerLinks[participant.participantId]) ?? null
@@ -1835,134 +2427,298 @@ export default function CreateFreeGamePage() {
                             <div
                               key={participant.participantId}
                               ref={(element) => {
-                                participantRowRefs.current[participant.participantId] = element;
+                                participantMobileRowRefs.current[participant.participantId] =
+                                  element;
                               }}
                               onClick={() => {
                                 if (isPartnerCandidate && !isAssignmentEditingLocked) {
                                   assignPartner(participant.participantId);
                                 }
                               }}
-                              className={`grid grid-cols-[56px_minmax(0,2fr)_72px_88px_84px_minmax(0,1.5fr)_48px] items-center gap-4 px-4 py-3 transition-colors ${
-                                index > 0 ? "border-t-2 border-slate-100" : ""
-                              } ${
+                              className={`px-3 py-3 transition-colors border-b-2 border-slate-100 ${
                                 isPartnerSource
                                   ? "bg-violet-50"
                                   : isPartnerCandidate
                                     ? isAssignmentEditingLocked
-                                      ? "bg-white"
+                                  ? "bg-white"
                                       : "cursor-pointer bg-white hover:bg-violet-50"
                                     : "hover:bg-slate-50"
                               }`}
                             >
-                              <div className="text-center font-mono text-xs text-slate-400">
-                                {String(index + 1).padStart(2, "0")}
-                              </div>
-                              <div className="text-sm font-bold text-slate-900">
-                                {participant.name}
-                              </div>
-                              <div className="text-center font-mono text-xs text-slate-600">
-                                {getGenderLabel(participant.gender)}
-                              </div>
-                              <div className="text-center font-mono text-xs text-slate-600">
-                                {getAgeGroupLabel(participant.ageGroup)}
-                              </div>
-                              <div className="flex justify-center">
-                                <span className="border-2 border-slate-200 bg-slate-100 px-2 py-1 text-xs font-mono font-bold uppercase text-slate-700">
-                                  {participant.level}
-                                </span>
-                              </div>
-                              <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <div className="min-w-0 flex flex-1 items-center gap-1.5">
+                                  <span className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
+                                    {String(index + 1).padStart(2, "0")}
+                                  </span>
+                                  <span className="min-w-0 truncate text-sm font-bold text-slate-900">
+                                    {participant.name}
+                                  </span>
+                                  <span className="shrink-0 text-[10px] font-mono text-slate-500">
+                                    {getGenderLabel(participant.gender)}·
+                                    {getAgeGroupCompactLabel(participant.ageGroup)}·
+                                    {getLevelCompactLabel(participant.level)}
+                                  </span>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-1.5">
                                 {isPartnerSource ? (
-                                  <div className="flex items-center gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
-                                    <span className="truncate text-xs font-bold text-slate-900">
-                                      {participant.name}
-                                    </span>
-                                    <span className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700">
-                                      파트너 선택 중
-                                    </span>
+                                  <div className="flex h-8 items-center rounded-none border-2 border-violet-300 bg-violet-100 px-2.5 text-[10px] font-mono font-bold text-violet-800">
+                                    선택중
                                   </div>
                                 ) : isPartnerCandidate ? (
-                                  <div className="flex items-center justify-between gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
-                                    <span
-                                      className={`shrink-0 border px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase tracking-widest ${
-                                        partner
-                                          ? "border-amber-200 bg-amber-50 text-amber-700"
-                                          : "border-violet-200 bg-white text-violet-700"
-                                      }`}
-                                    >
-                                      {partner ? "교체" : "선택"}
-                                    </span>
-                                    <span className="min-w-0 truncate text-xs font-bold text-slate-900">
-                                      이 참가자와 연결
-                                    </span>
-                                  </div>
-                                ) : partner ? (
-                                  <div className="flex items-center justify-between gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
-                                    <div className="min-w-0 truncate text-xs font-bold text-slate-900">
-                                      {partner.name}
-                                    </div>
-                                    <div className="flex shrink-0 items-center gap-1">
-                                      <button
-                                        type="button"
-                                        disabled={isAssignmentEditingLocked}
-                                        className="border border-violet-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          startPartnerSelection(participant.participantId);
-                                        }}
-                                      >
-                                        변경
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={isAssignmentEditingLocked}
-                                        className="border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          clearPartner(participant.participantId);
-                                        }}
-                                      >
-                                        해제
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <Button
+                                  <button
                                     type="button"
-                                    variant="outline"
                                     disabled={isAssignmentEditingLocked}
-                                    className="h-9 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700"
+                                    className="flex h-8 items-center rounded-none border-2 border-violet-300 bg-violet-50 px-2.5 text-[10px] font-mono font-bold text-violet-800 hover:border-violet-400 hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      assignPartner(participant.participantId);
+                                    }}
+                                  >
+                                    연결
+                                  </button>
+                                ) : partner ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      title={partner.name}
+                                      disabled={isAssignmentEditingLocked}
+                                      className="flex h-8 max-w-[92px] items-center rounded-none border-2 border-violet-300 bg-violet-50 px-2.5 text-[10px] font-bold text-violet-800 hover:border-violet-400 hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        startPartnerSelection(participant.participantId);
+                                      }}
+                                    >
+                                      <span className="truncate">
+                                      {partner.name}
+                                      </span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isAssignmentEditingLocked}
+                                      className="flex h-8 w-8 items-center justify-center rounded-none border-2 border-slate-200 bg-white text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        clearPartner(participant.participantId);
+                                      }}
+                                      aria-label={`${participant.name} 파트너 해제`}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={isAssignmentEditingLocked}
+                                    className="flex h-8 items-center rounded-none border-2 border-slate-200 bg-white px-2.5 text-[10px] font-semibold text-slate-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       startPartnerSelection(participant.participantId);
                                     }}
                                   >
                                     파트너 지정
-                                  </Button>
+                                  </button>
                                 )}
-                              </div>
-                              <div className="flex justify-end">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  disabled={isAssignmentEditingLocked}
-                                  className="h-8 w-8 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    removeParticipant(participant.participantId);
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                                  <button
+                                    type="button"
+                                    disabled={isAssignmentEditingLocked}
+                                    className="flex h-8 w-8 items-center justify-center rounded-none border-2 border-slate-200 bg-white text-slate-400 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      removeParticipant(participant.participantId);
+                                    }}
+                                    aria-label={`${participant.name} 삭제`}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           );
                         })}
                         {participants.length === 0 && (
-                          <div className="py-12 text-center font-mono text-xs uppercase tracking-widest text-slate-400">
-                            아직 추가된 참가자가 없습니다
+                          <div className="flex min-h-[176px] flex-col items-center justify-center px-6 py-10 text-center">
+                            <div className="text-sm font-bold text-slate-900">
+                              아직 추가된 참가자가 없습니다
+                            </div>
+                            <div className="mt-1 text-xs font-mono text-slate-500">
+                              이름과 조건을 입력한 뒤 참가자를 추가하세요.
+                            </div>
                           </div>
                         )}
+                      </div>
+
+                      <div className="hidden md:block">
+                        <div className="overflow-x-auto">
+                          <div className="min-w-[620px] lg:min-w-[760px]">
+                            <div className="grid grid-cols-[48px_minmax(0,1.8fr)_64px_78px_72px_minmax(0,1.4fr)_40px] gap-3 border-b-2 border-slate-200 bg-slate-50 px-4 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 lg:grid-cols-[56px_minmax(0,2fr)_72px_88px_84px_minmax(0,1.5fr)_48px] lg:gap-4">
+                              <div className="text-center">ID</div>
+                              <div className="text-center">이름</div>
+                              <div className="text-center">성별</div>
+                              <div className="text-center">연령</div>
+                              <div className="text-center">등급</div>
+                              <div className="text-center">파트너</div>
+                              <div className="text-center">관리</div>
+                            </div>
+                            <div
+                              ref={participantListViewportRef}
+                              className="wizard-scroll max-h-[min(26rem,42vh)] bg-white"
+                            >
+                              {participants.map((participant, index) => {
+                                const partner = partnerLinks[participant.participantId]
+                                  ? participantById.get(
+                                      partnerLinks[participant.participantId]
+                                    ) ?? null
+                                  : null;
+                                const isPartnerSource =
+                                  partnerSelectionSourceId === participant.participantId;
+                                const isPartnerCandidate =
+                                  partnerSelectionSourceId !== null &&
+                                  partnerSelectionSourceId !== participant.participantId;
+
+                                return (
+                                  <div
+                                    key={participant.participantId}
+                                    ref={(element) => {
+                                      participantDesktopRowRefs.current[
+                                        participant.participantId
+                                      ] = element;
+                                    }}
+                                    onClick={() => {
+                                      if (isPartnerCandidate && !isAssignmentEditingLocked) {
+                                        assignPartner(participant.participantId);
+                                      }
+                                    }}
+                                    className={`grid grid-cols-[48px_minmax(0,1.8fr)_64px_78px_72px_minmax(0,1.4fr)_40px] items-center gap-3 px-4 py-3 transition-colors border-b-2 border-slate-100 lg:grid-cols-[56px_minmax(0,2fr)_72px_88px_84px_minmax(0,1.5fr)_48px] lg:gap-4 ${
+                                      isPartnerSource
+                                        ? "bg-violet-50"
+                                        : isPartnerCandidate
+                                          ? isAssignmentEditingLocked
+                                            ? "bg-white"
+                                            : "cursor-pointer bg-white hover:bg-violet-50"
+                                          : "hover:bg-slate-50"
+                                    }`}
+                                  >
+                                    <div className="text-center font-mono text-xs text-slate-400">
+                                      {String(index + 1).padStart(2, "0")}
+                                    </div>
+                                    <div className="text-sm font-bold text-slate-900">
+                                      {participant.name}
+                                    </div>
+                                    <div className="text-center font-mono text-xs text-slate-600">
+                                      {getGenderLabel(participant.gender)}
+                                    </div>
+                                    <div className="text-center font-mono text-xs text-slate-600">
+                                      {getAgeGroupLabel(participant.ageGroup)}
+                                    </div>
+                                    <div className="flex justify-center">
+                                      <span className="border-2 border-slate-200 bg-slate-100 px-2 py-1 text-xs font-mono font-bold uppercase text-slate-700">
+                                        {participant.level}
+                                      </span>
+                                    </div>
+                                    <div className="min-w-0">
+                                      {isPartnerSource ? (
+                                        <div className="flex items-center gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
+                                          <span className="truncate text-xs font-bold text-slate-900">
+                                            {participant.name}
+                                          </span>
+                                          <span className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700">
+                                            파트너 선택 중
+                                          </span>
+                                        </div>
+                                      ) : isPartnerCandidate ? (
+                                        <div className="flex items-center justify-between gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
+                                          <span
+                                            className={`shrink-0 border px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase tracking-widest ${
+                                              partner
+                                                ? "border-amber-200 bg-amber-50 text-amber-700"
+                                                : "border-violet-200 bg-white text-violet-700"
+                                            }`}
+                                          >
+                                            {partner ? "교체" : "선택"}
+                                          </span>
+                                          <span className="min-w-0 truncate text-xs font-bold text-slate-900">
+                                            이 참가자와 연결
+                                          </span>
+                                        </div>
+                                      ) : partner ? (
+                                        <div className="flex items-center justify-between gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
+                                          <div className="min-w-0 truncate text-xs font-bold text-slate-900">
+                                            {partner.name}
+                                          </div>
+                                          <div className="flex shrink-0 items-center gap-1">
+                                            <button
+                                              type="button"
+                                              disabled={isAssignmentEditingLocked}
+                                              className="border border-violet-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                startPartnerSelection(
+                                                  participant.participantId
+                                                );
+                                              }}
+                                            >
+                                              변경
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={isAssignmentEditingLocked}
+                                              className="border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                clearPartner(participant.participantId);
+                                              }}
+                                            >
+                                              해제
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          disabled={isAssignmentEditingLocked}
+                                          className="h-9 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            startPartnerSelection(
+                                              participant.participantId
+                                            );
+                                          }}
+                                        >
+                                          파트너 지정
+                                        </Button>
+                                      )}
+                                    </div>
+                                    <div className="flex justify-end">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        disabled={isAssignmentEditingLocked}
+                                        className="h-8 w-8 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          removeParticipant(participant.participantId);
+                                        }}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              {participants.length === 0 && (
+                                <div className="flex min-h-[196px] flex-col items-center justify-center px-6 text-center">
+                                  <div className="text-sm font-bold text-slate-900">
+                                    아직 추가된 참가자가 없습니다
+                                  </div>
+                                  <div className="mt-1 text-xs font-mono text-slate-500">
+                                    참가자를 추가하면 이 목록에서 바로 확인할 수 있습니다.
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1977,253 +2733,194 @@ export default function CreateFreeGamePage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
-                className="space-y-4"
+                className="flex min-h-0 flex-1 flex-col"
               >
-                <div className="mb-2 flex flex-col justify-between gap-3 border-b-2 border-slate-100 pb-2 sm:flex-row sm:items-end">
-                  <div>
-                    <h2 className="font-display text-xl font-bold uppercase text-slate-900 md:text-2xl">
-                      코트 배정
-                    </h2>
-                    <p className="mt-1 text-sm font-mono text-slate-500">
-                      배정할 코트 슬롯을 먼저 선택한 뒤 참가자를 등록하세요.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    <div className="flex items-center gap-2">
-                      {aiAssignmentIndicators.map((item) => {
-                        const Icon = item.icon;
+                <div
+                  className="wizard-scroll create-step-shell min-h-0 flex-1 pr-0.5 md:pr-1"
+                  tabIndex={0}
+                  role="region"
+                  aria-label="코트 배정 본문"
+                >
+                  <div className="space-y-5">
+                    <div className="border-2 border-slate-200 bg-slate-50 p-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setIsParticipantSummaryCollapsed((current) => !current)
+                        }
+                        className="flex w-full items-center justify-between gap-3 text-left"
+                        aria-expanded={!isParticipantSummaryCollapsed}
+                      >
+                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                          <h3 className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                            참가자 요약
+                          </h3>
+                          <p className="min-w-0 truncate text-xs font-mono text-slate-500">
+                            {participantSummaryMeta}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                          <span className="hidden sm:inline">
+                            {isParticipantSummaryCollapsed ? "펼치기" : "접기"}
+                          </span>
+                          <ChevronRight
+                            className={`h-4 w-4 transition-transform ${
+                              isParticipantSummaryCollapsed ? "" : "rotate-90"
+                            }`}
+                          />
+                        </div>
+                      </button>
 
-                        return (
-                          <Tooltip
-                            key={item.key}
-                            message={`${item.label}: ${item.value}`}
-                            position="top"
+                      <AnimatePresence initial={false}>
+                        {!isParticipantSummaryCollapsed && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.18, ease: "easeOut" }}
+                            className="overflow-hidden"
                           >
-                            {item.interactive ? (
-                              <button
-                                type="button"
-                                aria-label={`${item.label}: ${item.value}`}
-                                disabled={isAssignmentEditingLocked}
-                                onClick={item.onClick ?? undefined}
-                                className={`flex h-9 w-9 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors ${
-                                  isAssignmentEditingLocked
-                                    ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 shadow-none"
-                                    : item.className
-                                }`}
-                              >
-                                <Icon className="h-4 w-4" />
-                              </button>
-                            ) : (
-                              <div
-                                className={`flex h-9 w-9 items-center justify-center rounded-none border-2 shadow-[2px_2px_0px_0px_rgba(15,23,42,0.08)] transition-colors ${item.className}`}
-                              >
-                                <Icon className="h-4 w-4" />
-                              </div>
-                            )}
-                          </Tooltip>
-                        );
-                      })}
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={!canClearAllAssignments}
-                      onClick={handleClearAllAssignments}
-                      className="rounded-none border-2 border-slate-300 bg-white font-mono text-[10px] uppercase tracking-widest text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                    >
-                      <X className="mr-2 h-3 w-3" />
-                      전체 배정 초기화
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={isGeneratingAiPreview}
-                      onClick={() => void handleGenerateAiPreview()}
-                      className="rounded-none bg-emerald-500 font-mono text-[10px] uppercase tracking-widest text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-emerald-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none"
-                    >
-                      {isGeneratingAiPreview ? (
-                        <LoaderCircle className="mr-2 h-3 w-3 animate-spin" />
-                      ) : (
-                        <Activity className="mr-2 h-3 w-3" />
-                      )}
-                      {isGeneratingAiPreview ? "AI 배정 중..." : "AI 자동 배정"}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-5">
-                  <div className="border-2 border-slate-200 bg-slate-50 p-3">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setIsParticipantSummaryCollapsed((current) => !current)
-                      }
-                      className="flex w-full items-center justify-between gap-3 text-left"
-                      aria-expanded={!isParticipantSummaryCollapsed}
-                    >
-                      <div>
-                        <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                          참가자 요약
-                        </h3>
-                        <p className="mt-1 text-xs font-mono text-slate-500">
-                          {participantSummaryMeta}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                        <span>{isParticipantSummaryCollapsed ? "펼치기" : "접기"}</span>
-                        <ChevronRight
-                          className={`h-4 w-4 transition-transform ${
-                            isParticipantSummaryCollapsed ? "" : "rotate-90"
-                          }`}
-                        />
-                      </div>
-                    </button>
-
-                    <AnimatePresence initial={false}>
-                      {!isParticipantSummaryCollapsed && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.18, ease: "easeOut" }}
-                          className="overflow-hidden"
-                        >
-                          <div className="mt-3 border-t border-slate-200 pt-3">
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                              {participantSummaryGroups.map((group) =>
-                                group.type === "pair" ? (
-                                  <div key={group.key} className="relative xl:col-span-2">
-                                    <div className="grid gap-3 sm:grid-cols-2">
-                                      {group.participants.map((participant) => (
-                                        <div
-                                          key={participant.participantId}
-                                          className="flex items-center justify-between border-2 border-violet-400 bg-violet-50/20 p-3 text-left text-xs"
-                                        >
-                                          <div className="flex min-w-0 flex-1 items-center gap-2">
-                                            <span className="truncate font-bold text-slate-900">
-                                              {participant.name}
-                                            </span>
-                                            <span className="shrink-0 font-mono text-slate-500">
-                                              {getGenderLabel(participant.gender)}/
-                                              {getAgeGroupLabel(participant.ageGroup)}
+                            <div className="mt-3 border-t border-slate-200 pt-3">
+                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                {participantSummaryGroups.map((group) =>
+                                  group.type === "pair" ? (
+                                    <div key={group.key} className="relative xl:col-span-2">
+                                      <div className="grid gap-3 sm:grid-cols-2">
+                                        {group.participants.map((participant) => (
+                                          <div
+                                            key={participant.participantId}
+                                            className="flex items-center justify-between border-2 border-violet-400 bg-violet-50/20 p-3 text-left text-xs"
+                                          >
+                                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                                              <span className="truncate font-bold text-slate-900">
+                                                {participant.name}
+                                              </span>
+                                              <span className="shrink-0 font-mono text-slate-500">
+                                                {getGenderLabel(participant.gender)}/
+                                                {getAgeGroupLabel(
+                                                  participant.ageGroup
+                                                )}
+                                              </span>
+                                            </div>
+                                            <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
+                                              게임 수 {participant.gamesAssigned}
                                             </span>
                                           </div>
-                                          <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
-                                            게임 수 {participant.gamesAssigned}
-                                          </span>
-                                        </div>
-                                      ))}
+                                        ))}
+                                      </div>
+                                      <div className="pointer-events-none absolute top-1/2 left-1/2 hidden h-[3px] w-4 -translate-x-1/2 -translate-y-1/2 bg-violet-500 sm:block" />
+                                      <div className="mt-2 flex items-center justify-center sm:hidden">
+                                        <div className="h-[3px] w-4 bg-violet-500" />
+                                      </div>
                                     </div>
-                                    <div className="pointer-events-none absolute top-1/2 left-1/2 hidden h-[3px] w-4 -translate-x-1/2 -translate-y-1/2 bg-violet-500 sm:block" />
-                                    <div className="mt-2 flex items-center justify-center sm:hidden">
-                                      <div className="h-[3px] w-4 bg-violet-500" />
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div
-                                    key={group.key}
-                                    className="flex items-center justify-between border border-slate-200 bg-white p-3 text-left text-xs"
-                                  >
-                                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                                      <span className="truncate font-bold text-slate-900">
-                                        {group.participant.name}
+                                  ) : (
+                                    <div
+                                      key={group.key}
+                                      className="flex items-center justify-between border border-slate-200 bg-white p-3 text-left text-xs"
+                                    >
+                                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                                        <span className="truncate font-bold text-slate-900">
+                                          {group.participant.name}
+                                        </span>
+                                        <span className="shrink-0 font-mono text-slate-500">
+                                          {getGenderLabel(group.participant.gender)}/
+                                          {getAgeGroupLabel(
+                                            group.participant.ageGroup
+                                          )}
+                                        </span>
+                                      </div>
+                                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
+                                        게임 수 {group.participant.gamesAssigned}
                                       </span>
-                                      <span className="shrink-0 font-mono text-slate-500">
-                                        {getGenderLabel(group.participant.gender)}/
-                                        {getAgeGroupLabel(group.participant.ageGroup)}
-                                      </span>
                                     </div>
-                                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono font-bold text-slate-900">
-                                      게임 수 {group.participant.gamesAssigned}
-                                    </span>
-                                  </div>
-                                )
-                              )}
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  {rounds.length === 0 ? (
-                    <div className="border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center">
-                      <div className="text-sm font-medium text-slate-500">
-                        아직 생성된 라운드가 없습니다.
-                      </div>
-                    </div>
-                  ) : (
-                    rounds.map((round, roundIndex) => (
-                      <div key={round.id} className="space-y-6">
-                        <div className="flex items-center gap-4">
-                          <div className="h-px flex-1 bg-slate-200" />
-                          <span className="bg-slate-900 px-3 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-white">
-                            라운드 {String(roundIndex + 1).padStart(2, "0")}
-                          </span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={isAssignmentEditingLocked}
-                            className="h-6 rounded-none border border-slate-300 text-[10px] font-bold uppercase tracking-widest"
-                            onClick={() => addCourtToRound(round.id)}
-                          >
-                            + 코트 추가
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            disabled={isAssignmentEditingLocked}
-                            className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
-                            onClick={() => removeRoundBlock(round.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                          <div className="h-px flex-1 bg-slate-200" />
-                        </div>
-
-                        {round.courts.length === 0 ? (
-                          <div className="border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
-                            <div className="text-sm font-medium text-slate-500">
-                              이 라운드에는 아직 코트가 없습니다.
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="mx-auto flex max-w-[1140px] flex-wrap justify-center gap-7">
-                            {round.courts.map((court, courtIndex) => (
-                              <div
-                                key={court.id}
-                                className="w-full max-w-[264px] shrink-0 space-y-1 sm:w-[264px]"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
-                                    코트 {String(courtIndex + 1).padStart(2, "0")}
-                                  </span>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    disabled={isAssignmentEditingLocked}
-                                    className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
-                                    onClick={() => removeCourtFromRound(round.id, court.id)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                                <BadmintonCourt
-                                  court={court}
-                                  roundId={round.id}
-                                  assignmentTarget={assignmentTarget}
-                                  isLocked={isAssignmentEditingLocked}
-                                  selectAssignmentTarget={selectAssignmentTarget}
-                                />
+                                  )
+                                )}
                               </div>
-                            ))}
-                          </div>
+                            </div>
+                          </motion.div>
                         )}
-                      </div>
-                    ))
-                  )}
+                      </AnimatePresence>
+                    </div>
 
+                    {rounds.length === 0 ? (
+                      <div className="border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center">
+                        <div className="text-sm font-medium text-slate-500">
+                          아직 생성된 라운드가 없습니다.
+                        </div>
+                      </div>
+                    ) : (
+                      rounds.map((round, roundIndex) => (
+                        <div key={round.id} className="space-y-6">
+                          <div className="flex items-center gap-4">
+                            <div className="h-px flex-1 bg-slate-200" />
+                            <span className="bg-slate-900 px-3 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-white">
+                              라운드 {String(roundIndex + 1).padStart(2, "0")}
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={isAssignmentEditingLocked}
+                              className="h-6 rounded-none border border-slate-300 text-[10px] font-bold uppercase tracking-widest"
+                              onClick={() => addCourtToRound(round.id)}
+                            >
+                              + 코트 추가
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={isAssignmentEditingLocked}
+                              className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
+                              onClick={() => removeRoundBlock(round.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                            <div className="h-px flex-1 bg-slate-200" />
+                          </div>
+
+                          {round.courts.length === 0 ? (
+                            <div className="border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
+                              <div className="text-sm font-medium text-slate-500">
+                                이 라운드에는 아직 코트가 없습니다.
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mx-auto flex max-w-[1140px] flex-wrap justify-center gap-7">
+                              {round.courts.map((court, courtIndex) => (
+                                <div
+                                  key={court.id}
+                                  className="w-full max-w-[264px] shrink-0 space-y-1 sm:w-[264px]"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
+                                      코트 {String(courtIndex + 1).padStart(2, "0")}
+                                    </span>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      disabled={isAssignmentEditingLocked}
+                                      className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
+                                      onClick={() =>
+                                        removeCourtFromRound(round.id, court.id)
+                                      }
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                  <BadmintonCourt
+                                    court={court}
+                                    roundId={round.id}
+                                    assignmentTarget={assignmentTarget}
+                                    isLocked={isAssignmentEditingLocked}
+                                    selectAssignmentTarget={selectAssignmentTarget}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -2286,37 +2983,55 @@ export default function CreateFreeGamePage() {
         </div>
 
         {step < 4 && (
-          <div className="z-10 flex items-center justify-between border-t-2 border-slate-900 bg-slate-50 px-3 py-2.5 md:p-5">
+          <div
+            className={`z-10 border-t-2 border-slate-900 bg-slate-50 ${
+              step === 3
+                ? "flex flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between md:p-5"
+                : "flex items-center justify-between px-3 py-2.5 md:p-5"
+            }`}
+          >
             <Button
               variant="ghost"
               onClick={handlePrev}
               disabled={step === 1 || isSubmitting}
-              className="rounded-none font-mono text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-slate-900"
+              className={`rounded-none font-mono text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-slate-900 ${
+                step === 3 ? "self-start" : ""
+              }`}
             >
               <ChevronLeft className="mr-1 h-4 w-4" />
               Back
             </Button>
-            <div className="flex w-full max-w-[412px] justify-end gap-3">
-              {step === 3 ? (
+            {step === 3 ? (
+              <div className="grid w-full grid-cols-2 gap-2 md:flex md:w-auto md:justify-end md:gap-3">
                 <Button
                   type="button"
                   variant="outline"
                   disabled={isAssignmentEditingLocked}
                   onClick={addRoundBlock}
-                  className="h-12 w-full rounded-none border-2 border-slate-900 bg-white font-bold uppercase tracking-widest text-slate-900 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-slate-50 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:w-[200px]"
+                  className="h-11 w-full rounded-none border-2 border-slate-900 bg-white px-3 font-bold uppercase tracking-[0.14em] text-slate-900 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-slate-50 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none md:w-[172px]"
                 >
                   라운드 추가
                 </Button>
-              ) : null}
-              <Button
-                onClick={() => void handleNext()}
-                disabled={isSubmitting || (step === 3 && isGeneratingAiPreview)}
-                className="ml-auto h-10 w-[160px] gap-1.5 rounded-none bg-teal-500 px-4 text-xs font-bold uppercase tracking-[0.14em] text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-teal-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:h-11 sm:w-[168px] sm:text-sm sm:tracking-[0.16em]"
-              >
-                {nextButtonLabel}
-                {step !== 3 && !isSubmitting && <ChevronRight className="h-4 w-4" />}
-              </Button>
-            </div>
+                <Button
+                  onClick={() => void handleNext()}
+                  disabled={isSubmitting || isGeneratingAiPreview}
+                  className="h-11 w-full gap-1.5 rounded-none bg-teal-500 px-4 text-xs font-bold uppercase tracking-[0.14em] text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-teal-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none md:w-[188px] md:text-sm md:tracking-[0.16em]"
+                >
+                  {nextButtonLabel}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex w-full max-w-[184px] justify-end">
+                <Button
+                  onClick={() => void handleNext()}
+                  disabled={isSubmitting}
+                  className="h-10 w-[160px] gap-1.5 rounded-none bg-teal-500 px-4 text-xs font-bold uppercase tracking-[0.14em] text-slate-950 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-teal-400 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none sm:h-11 sm:w-[168px] sm:text-sm sm:tracking-[0.16em]"
+                >
+                  {nextButtonLabel}
+                  {!isSubmitting && <ChevronRight className="h-4 w-4" />}
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -2328,13 +3043,17 @@ export default function CreateFreeGamePage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 px-4 py-8"
+            onClick={() => setIsLocationModalOpen(false)}
           >
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 12 }}
               transition={{ duration: 0.2 }}
-              className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[6px_6px_0px_0px_rgba(15,23,42,1)]"
+              role="dialog"
+              aria-modal="true"
+              className="flex max-h-[min(80svh,42rem)] w-full max-w-2xl flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[6px_6px_0px_0px_rgba(15,23,42,1)]"
+              onClick={(event) => event.stopPropagation()}
             >
               <div className="flex items-center justify-between border-b-2 border-slate-900 px-5 py-4">
                 <div>
@@ -2356,7 +3075,7 @@ export default function CreateFreeGamePage() {
                 </Button>
               </div>
 
-              <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              <div className="modal-scroll flex-1 space-y-4 p-5">
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <MapPin className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -2454,13 +3173,17 @@ export default function CreateFreeGamePage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 px-4 py-8"
+            onClick={closeParticipantAssignModal}
           >
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 12 }}
               transition={{ duration: 0.2 }}
-              className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[6px_6px_0px_0px_rgba(15,23,42,1)]"
+              role="dialog"
+              aria-modal="true"
+              className="flex max-h-[min(80svh,42rem)] w-full max-w-2xl flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[6px_6px_0px_0px_rgba(15,23,42,1)]"
+              onClick={(event) => event.stopPropagation()}
             >
               <div className="flex items-center justify-between border-b-2 border-slate-900 px-5 py-4">
                 <div>
@@ -2485,7 +3208,7 @@ export default function CreateFreeGamePage() {
                 </Button>
               </div>
 
-              <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              <div className="modal-scroll flex-1 space-y-4 p-5">
                 {participants.length > 0 ? (
                   <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                     {participants.map((participant) => {

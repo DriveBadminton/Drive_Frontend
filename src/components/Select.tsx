@@ -12,6 +12,7 @@ type Props = {
   onChange: (value: string) => void;
   className?: string;
   variant?: "default" | "brutalist";
+  size?: "default" | "compact";
 };
 
 export default function Select({
@@ -22,6 +23,7 @@ export default function Select({
   onChange,
   className = "",
   variant = "default",
+  size = "default",
 }: Props) {
   const buttonId = useId();
   const listboxId = useId();
@@ -149,21 +151,37 @@ export default function Select({
     activeIndex >= 0 ? `${listboxId}-opt-${activeIndex}` : undefined;
   const styles =
     variant === "brutalist"
-      ? {
-          trigger:
-            "h-[50px] w-full rounded-none border-2 border-slate-200 bg-slate-50 py-3 pl-3 pr-9 text-left text-sm font-medium text-slate-900 transition-colors hover:bg-white disabled:opacity-60 focus-visible:outline-none focus-visible:border-slate-900",
-          iconWrap:
-            "pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-500",
-          icon: "h-4 w-4",
-          menu:
-            "absolute z-50 mt-2 w-full max-h-[280px] overflow-y-auto border-2 border-slate-900 bg-white p-1 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] outline-none",
-          option: {
-            base: "flex w-full items-center justify-between rounded-none px-3 py-2 text-sm font-medium text-slate-900 transition-colors",
-            selected: "bg-teal-50 text-slate-900",
-            active: "bg-slate-100",
-            check: "h-4 w-4 text-teal-600",
-          },
-        }
+      ? size === "compact"
+        ? {
+            trigger:
+              "h-11 w-full rounded-none border-2 border-slate-200 bg-slate-50 py-2 pl-2 pr-6 text-left text-[12px] font-semibold text-slate-900 transition-colors hover:bg-white disabled:opacity-60 focus-visible:outline-none focus-visible:border-slate-900",
+            iconWrap:
+              "pointer-events-none absolute inset-y-0 right-2 flex items-center text-slate-500",
+            icon: "h-3.5 w-3.5",
+            menu:
+              "absolute z-50 mt-2 w-full max-h-[280px] overflow-y-auto border-2 border-slate-900 bg-white p-1 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] outline-none",
+            option: {
+              base: "flex w-full items-center justify-between rounded-none px-3 py-2 text-sm font-medium text-slate-900 transition-colors",
+              selected: "bg-teal-50 text-slate-900",
+              active: "bg-slate-100",
+              check: "h-4 w-4 text-teal-600",
+            },
+          }
+        : {
+            trigger:
+              "h-[50px] w-full rounded-none border-2 border-slate-200 bg-slate-50 py-3 pl-3 pr-9 text-left text-sm font-medium text-slate-900 transition-colors hover:bg-white disabled:opacity-60 focus-visible:outline-none focus-visible:border-slate-900",
+            iconWrap:
+              "pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-500",
+            icon: "h-4 w-4",
+            menu:
+              "absolute z-50 mt-2 w-full max-h-[280px] overflow-y-auto border-2 border-slate-900 bg-white p-1 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] outline-none",
+            option: {
+              base: "flex w-full items-center justify-between rounded-none px-3 py-2 text-sm font-medium text-slate-900 transition-colors",
+              selected: "bg-teal-50 text-slate-900",
+              active: "bg-slate-100",
+              check: "h-4 w-4 text-teal-600",
+            },
+          }
       : {
           trigger:
             "w-full rounded-xl border border-border bg-background pl-4 pr-12 py-3 text-left text-sm text-foreground shadow-sm transition-colors hover:bg-background-secondary disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",

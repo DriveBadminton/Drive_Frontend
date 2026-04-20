@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DayPicker } from "react-day-picker";
 import { ko } from "react-day-picker/locale";
 import { Calendar, X } from "lucide-react";
@@ -220,11 +221,13 @@ export function SessionDateTimePicker({
   const effectiveDateBoundary = dateBoundary ?? getDefaultDateBoundary(mode);
   const initialDraft = getTimeDraft(parsePickerValue(value, mode).time);
   const [isOpen, setIsOpen] = useState(false);
-  const [placement, setPlacement] = useState<"bottom" | "top">("bottom");
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+  const [desktopPanelStyle, setDesktopPanelStyle] = useState<CSSProperties>();
   const [hourInput, setHourInput] = useState(initialDraft.hour);
   const [minuteInput, setMinuteInput] = useState(initialDraft.minute);
   const [timeError, setTimeError] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const now = new Date();
   const today = startOfDay(now);
   const { day: selectedDay, time: selectedTime } = parsePickerValue(value, mode);
@@ -258,7 +261,12 @@ export function SessionDateTimePicker({
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+
+      if (
+        !rootRef.current?.contains(target) &&
+        !panelRef.current?.contains(target)
+      ) {
         closePicker();
       }
     };
@@ -278,17 +286,98 @@ export function SessionDateTimePicker({
     };
   }, []);
 
-  const toggleOpen = () => {
-    if (!isOpen && rootRef.current) {
-      const rect = rootRef.current.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-      const spaceAbove = rect.top;
-      const requiredSpace = mode === "date" ? 360 : 420;
-      const spaceBelow = viewportHeight - rect.bottom;
+  useEffect(() => {
+    if (!isOpen || isDesktopViewport) {
+      return;
+    }
 
-      setPlacement(
-        spaceBelow < requiredSpace && spaceAbove > spaceBelow ? "top" : "bottom"
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverscroll = document.documentElement.style.overscrollBehavior;
+    const previousBodyOverscroll = document.body.style.overscrollBehavior;
+
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overscrollBehavior = "none";
+    document.body.style.overscrollBehavior = "none";
+
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overscrollBehavior = previousHtmlOverscroll;
+      document.body.style.overscrollBehavior = previousBodyOverscroll;
+    };
+  }, [isDesktopViewport, isOpen]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 640px)");
+
+    const syncViewport = () => {
+      setIsDesktopViewport(mediaQuery.matches);
+    };
+
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+
+    return () => {
+      mediaQuery.removeEventListener("change", syncViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || !rootRef.current || !isDesktopViewport) {
+      return;
+    }
+
+    const syncDesktopPanelStyle = () => {
+      if (!rootRef.current) {
+        return;
+      }
+
+      const rect = rootRef.current.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const horizontalMargin = 24;
+      const verticalGap = 8;
+      const desiredWidth = mode === "date" ? 384 : 640;
+      const width = Math.min(desiredWidth, viewportWidth - horizontalMargin * 2);
+      const left = Math.min(
+        Math.max(rect.left, horizontalMargin),
+        viewportWidth - width - horizontalMargin
       );
+      const topSpace = rect.top - 16;
+      const bottomSpace = viewportHeight - rect.bottom - 16;
+      const requiredSpace = mode === "date" ? 360 : 420;
+      const shouldOpenUpward =
+        bottomSpace < requiredSpace && topSpace > bottomSpace;
+
+      setDesktopPanelStyle(
+        shouldOpenUpward
+          ? {
+              bottom: viewportHeight - rect.top + verticalGap,
+              left,
+              width,
+            }
+          : {
+              left,
+              top: rect.bottom + verticalGap,
+              width,
+            }
+      );
+    };
+
+    syncDesktopPanelStyle();
+    window.addEventListener("resize", syncDesktopPanelStyle);
+    window.addEventListener("scroll", syncDesktopPanelStyle, true);
+
+    return () => {
+      window.removeEventListener("resize", syncDesktopPanelStyle);
+      window.removeEventListener("scroll", syncDesktopPanelStyle, true);
+    };
+  }, [isDesktopViewport, isOpen, mode]);
+
+  const toggleOpen = () => {
+    if (!isOpen) {
       syncDrafts(selectedTime);
     }
 
@@ -423,101 +512,105 @@ export function SessionDateTimePicker({
         </span>
       </button>
 
-      {isOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-slate-950/28 sm:hidden"
-            aria-hidden="true"
-            onClick={closePicker}
-          />
-          <div
-            className={cn(
-              "fixed inset-x-4 top-1/2 z-50 max-h-[calc(100vh-2rem)] -translate-y-1/2 overflow-y-auto border-2 border-slate-900 bg-white p-3 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] sm:absolute sm:left-0 sm:right-auto sm:top-auto sm:max-h-none sm:w-[min(40rem,calc(100vw-3rem))] sm:translate-y-0 sm:overflow-visible",
-              placement === "top"
-                ? "sm:bottom-full sm:mb-2"
-                : "sm:top-full sm:mt-2",
-              mode === "date" ? "sm:max-w-[24rem]" : ""
-            )}
-          >
-            <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-2 sm:hidden">
-              <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                {mode === "date" ? "날짜 선택" : "날짜 및 시간 선택"}
-              </div>
-              <button
-                type="button"
-                onClick={closePicker}
-                aria-label="날짜 선택 닫기"
-                className="flex h-8 w-8 items-center justify-center border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-900 hover:text-slate-900"
+      {isOpen && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              {!isDesktopViewport ? (
+                <div
+                  className="fixed inset-0 z-40 bg-slate-950/28"
+                  aria-hidden="true"
+                  onClick={closePicker}
+                />
+              ) : null}
+              <div
+                ref={panelRef}
+                role="dialog"
+                aria-modal={!isDesktopViewport}
+                className={cn(
+                  "fixed inset-x-4 top-1/2 z-50 max-h-[calc(100svh-2rem)] -translate-y-1/2 overflow-y-auto border-2 border-slate-900 bg-white p-3 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] sm:inset-auto sm:max-h-none sm:translate-y-0 sm:overflow-visible"
+                )}
+                style={isDesktopViewport ? desktopPanelStyle : undefined}
+                onClick={(event) => event.stopPropagation()}
               >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div
-              className={cn(
-                "grid gap-3",
-                mode === "date"
-                  ? "grid-cols-1"
-                  : "grid-cols-1 md:grid-cols-[minmax(0,1fr)_15rem]"
-              )}
-            >
-              <div className="border-2 border-slate-100 bg-slate-50 p-3">
-                <div className="max-h-[18.5rem] overflow-auto">
-                  <DayPicker
-                    mode="single"
-                    selected={selectedDay}
-                    onSelect={handleDaySelect}
-                    disabled={isDayDisabled}
-                    startMonth={visibleMonthStart}
-                    endMonth={visibleMonthEnd}
-                    defaultMonth={defaultMonth}
-                    navLayout="around"
-                    showOutsideDays={false}
-                    locale={ko}
-                    classNames={{
-                      root: "w-full",
-                      months: "w-full",
-                      month:
-                        "grid w-full grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] grid-rows-[2.25rem_auto] items-center gap-y-3",
-                      month_caption:
-                        "col-start-2 row-start-1 flex h-9 items-center justify-center text-sm font-bold tracking-tight text-slate-900",
-                      caption_label: "block text-center leading-none",
-                      button_previous:
-                        "col-start-1 row-start-1 flex h-9 w-9 self-center items-center justify-center border-2 border-slate-200 bg-white text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50",
-                      button_next:
-                        "col-start-3 row-start-1 flex h-9 w-9 self-center items-center justify-center border-2 border-slate-200 bg-white text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50",
-                      month_grid: "col-span-3 row-start-2 w-full border-collapse",
-                      weekdays: "border-b-2 border-slate-200",
-                      weekday:
-                        "pb-2 text-center text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400",
-                      week: "mt-1",
-                      day: "p-0 text-center",
-                      day_button:
-                        "flex h-10 w-full items-center justify-center border border-slate-100 bg-white text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50",
-                      today: "text-teal-600",
-                      selected:
-                        "bg-teal-500 text-slate-950 hover:bg-teal-400 border-slate-900",
-                      outside: "text-slate-300",
-                      disabled:
-                        "bg-slate-50 text-slate-300 [&>button]:cursor-not-allowed [&>button]:border-slate-100 [&>button]:bg-slate-50 [&>button]:text-slate-300 [&>button]:hover:bg-slate-50",
-                    }}
-                  />
+                <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-2 sm:hidden">
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                    {mode === "date" ? "날짜 선택" : "날짜 및 시간 선택"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closePicker}
+                    aria-label="날짜 선택 닫기"
+                    className="flex h-8 w-8 items-center justify-center border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-900 hover:text-slate-900"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-              </div>
 
-              {mode === "date-time" ? (
-                <div className="border-2 border-slate-100 bg-white p-3">
-                  <div className="mb-3">
-                    <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
-                      시간 입력
+                <div
+                  className={cn(
+                    "grid gap-3",
+                    mode === "date"
+                      ? "grid-cols-1"
+                      : "grid-cols-1 md:grid-cols-[minmax(0,1fr)_15rem]"
+                  )}
+                >
+                  <div className="border-2 border-slate-100 bg-slate-50 p-3">
+                    <div className="max-h-[18.5rem] overflow-auto">
+                      <DayPicker
+                        mode="single"
+                        selected={selectedDay}
+                        onSelect={handleDaySelect}
+                        disabled={isDayDisabled}
+                        startMonth={visibleMonthStart}
+                        endMonth={visibleMonthEnd}
+                        defaultMonth={defaultMonth}
+                        navLayout="around"
+                        showOutsideDays={false}
+                        locale={ko}
+                        classNames={{
+                          root: "w-full",
+                          months: "w-full",
+                          month:
+                            "grid w-full grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] grid-rows-[2.25rem_auto] items-center gap-y-3",
+                          month_caption:
+                            "col-start-2 row-start-1 flex h-9 items-center justify-center text-sm font-bold tracking-tight text-slate-900",
+                          caption_label: "block text-center leading-none",
+                          button_previous:
+                            "col-start-1 row-start-1 flex h-9 w-9 self-center items-center justify-center border-2 border-slate-200 bg-white text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50",
+                          button_next:
+                            "col-start-3 row-start-1 flex h-9 w-9 self-center items-center justify-center border-2 border-slate-200 bg-white text-slate-700 transition-colors hover:border-slate-900 hover:bg-slate-50",
+                          month_grid: "col-span-3 row-start-2 w-full border-collapse",
+                          weekdays: "border-b-2 border-slate-200",
+                          weekday:
+                            "pb-2 text-center text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400",
+                          week: "mt-1",
+                          day: "p-0 text-center",
+                          day_button:
+                            "flex h-10 w-full items-center justify-center border border-slate-100 bg-white text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-50",
+                          today: "text-teal-600",
+                          selected:
+                            "bg-teal-500 text-slate-950 hover:bg-teal-400 border-slate-900",
+                          outside: "text-slate-300",
+                          disabled:
+                            "bg-slate-50 text-slate-300 [&>button]:cursor-not-allowed [&>button]:border-slate-100 [&>button]:bg-slate-50 [&>button]:text-slate-300 [&>button]:hover:bg-slate-50",
+                        }}
+                      />
                     </div>
                   </div>
 
-                  {selectedDay ? (
-                    <div className="max-h-[18.5rem] space-y-3 overflow-y-auto pr-1">
-                      <div className="border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-slate-500">
-                        {formatDateLabel(selectedDay)}
+                  {mode === "date-time" ? (
+                    <div className="border-2 border-slate-100 bg-white p-3">
+                      <div className="mb-3">
+                        <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
+                          시간 입력
+                        </div>
                       </div>
+
+                      {selectedDay ? (
+                        <div className="max-h-[18.5rem] space-y-3 overflow-y-auto pr-1">
+                          <div className="border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+                            {formatDateLabel(selectedDay)}
+                          </div>
 
                       <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
                         <div className="space-y-1.5">
@@ -574,18 +667,20 @@ export function SessionDateTimePicker({
                       >
                         시간 적용
                       </button>
+                        </div>
+                      ) : (
+                        <div className="flex min-h-[10rem] items-center justify-center border border-dashed border-slate-200 bg-slate-50 px-4 text-center text-[11px] font-mono uppercase tracking-widest text-slate-400">
+                          먼저 날짜를 선택해주세요
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="flex min-h-[10rem] items-center justify-center border border-dashed border-slate-200 bg-slate-50 px-4 text-center text-[11px] font-mono uppercase tracking-widest text-slate-400">
-                      먼저 날짜를 선택해주세요
-                    </div>
-                  )}
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-          </div>
-        </>
-      )}
+              </div>
+            </>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

@@ -76,3 +76,93 @@ input[type="number"]::-webkit-outer-spin-button {
   scrollbar-width: thin;
   scrollbar-color: rgba(20, 184, 166, 0.4) rgba(15, 23, 42, 0.06);
 }
+
+.scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+.wizard-scroll {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.wizard-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.modal-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(20, 184, 166, 0.4) rgba(15, 23, 42, 0.06);
+}
+
+.modal-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-scroll::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 4px;
+}
+
+.modal-scroll::-webkit-scrollbar-thumb {
+  background: rgba(20, 184, 166, 0.4);
+  border-radius: 4px;
+}
+
+.modal-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(20, 184, 166, 0.6);
+}
+
+.toolbar-scroll-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.toolbar-scroll-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+.create-step-shell {
+  container-type: inline-size;
+}
+
+@container (width >= 42rem) {
+  .create-step-split-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .wizard-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(20, 184, 166, 0.35) rgba(15, 23, 42, 0.08);
+  }
+
+  .wizard-scroll::-webkit-scrollbar {
+    display: block;
+    width: 8px;
+  }
+
+  .wizard-scroll::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.08);
+    border-radius: 4px;
+  }
+
+  .wizard-scroll::-webkit-scrollbar-thumb {
+    background: rgba(20, 184, 166, 0.35);
+    border-radius: 4px;
+  }
+
+  .wizard-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(20, 184, 166, 0.55);
+  }
+}
