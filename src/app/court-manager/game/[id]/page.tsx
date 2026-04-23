@@ -4,28 +4,43 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import {
-  Calendar,
+  Activity,
   ChevronLeft,
   Copy,
+  LoaderCircle,
   PencilLine,
-  Settings2,
-  Users,
+  UserPlus,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import Select from "@/components/Select";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserFacingErrorMessage } from "@/lib/api";
+import { formatGradeLabel, toBackendGrade } from "@/lib/grade";
 import {
+  type AgeGroup,
+  type AssignmentPreviewExistingAssignmentPolicy,
   CourtMatch,
+  type CreateGameAssignmentPreviewRequest,
+  type CreateGameAssignmentPreviewResponse,
   Game,
   GameRound,
+  type Gender,
+  type Grade,
   MatchRecordMode,
   MatchResult,
+  MatchWinnerTeam,
   Participant,
   ScheduleDraftRound,
+  addFreeGameParticipant,
+  completeFreeGameMatch,
+  createFreeGameAssignmentPreview,
+  getFreeGameAssignmentPreviewJob,
   getGameById,
   getGameStatusLabel,
-  getGradeTypeLabel,
   getMatchRecordModeLabel,
+  startFreeGame,
+  startFreeGameMatch,
   updateGame,
   updateGameSchedule,
 } from "@/lib/game";
@@ -43,6 +58,79 @@ type SettingsDraft = {
   matchRecordMode: MatchRecordMode;
   gradeType: Game["gradeType"];
 };
+
+type EditMode = "settings" | "schedule" | null;
+
+type ScheduleAssignmentTarget = {
+  roundNumber: number;
+  courtNumber: number;
+  slotIndex: 0 | 1 | 2 | 3;
+};
+
+type DisplayRoundGroup = {
+  roundNumber: number;
+  visualStatus: VisualRoundStatus;
+  courts: Array<{
+    match: CourtMatch;
+    participants: (Participant | undefined)[];
+  }>;
+};
+
+type MatchScoreDraft = {
+  teamAScore: string;
+  teamBScore: string;
+};
+
+type ParticipantDraft = {
+  name: string;
+  gender: Gender;
+  age: AgeGroup;
+  grade: Grade;
+};
+
+const AI_ASSIGNMENT_POLICY_LABELS: Record<
+  AssignmentPreviewExistingAssignmentPolicy,
+  string
+> = {
+  FILL_EMPTY_SLOTS: "빈 슬롯만 채우기",
+  REASSIGN_ALL: "전체 다시 배정",
+};
+
+const AI_PREVIEW_GENERIC_FAILURE_MESSAGE =
+  "자동 배정을 완료하지 못했어요. 잠시 후 다시 시도해주세요.";
+const ASSIGNMENT_PREVIEW_CONTRACT_ERROR_MESSAGE =
+  "자동 배정 결과를 적용할 수 없어요. 현재 대진표는 유지했어요. 잠시 후 다시 시도해주세요.";
+const DEFAULT_PARTICIPANT_DRAFT: ParticipantDraft = {
+  name: "",
+  gender: "MALE",
+  age: 20,
+  grade: "C",
+};
+const PARTICIPANT_GENDER_OPTIONS: Array<{ value: Gender; label: string }> = [
+  { value: "MALE", label: "남" },
+  { value: "FEMALE", label: "여" },
+];
+const PARTICIPANT_AGE_OPTIONS: AgeGroup[] = [10, 20, 30, 40, 50, 60, 70];
+const PARTICIPANT_GRADE_OPTIONS: Grade[] = ["ROOKIE", "D", "C", "B", "A", "S", "SS"];
+const GRADE_TYPE_OPTIONS: Array<{ value: Game["gradeType"]; label: string }> = [
+  { value: "REGIONAL", label: "지역 급수" },
+  { value: "NATIONAL", label: "전국 급수" },
+];
+const PARTICIPANT_AGE_SELECT_OPTIONS = PARTICIPANT_AGE_OPTIONS.map((age) => ({
+  value: String(age),
+  label: `${age}대`,
+}));
+const PARTICIPANT_GRADE_SELECT_OPTIONS = PARTICIPANT_GRADE_OPTIONS.map((grade) => ({
+  value: grade,
+  label: formatGradeLabel(grade),
+}));
+
+class DetailAssignmentPreviewContractError extends Error {
+  constructor(message = ASSIGNMENT_PREVIEW_CONTRACT_ERROR_MESSAGE) {
+    super(message);
+    this.name = "DetailAssignmentPreviewContractError";
+  }
+}
 
 function toResultLabel(result: MatchResult) {
   switch (result) {
@@ -62,15 +150,84 @@ function toVisualRoundStatus(matches: CourtMatch[]): VisualRoundStatus {
     return "completed";
   }
 
-  if (
-    matches.some(
-      (match) => match.status === "IN_PROGRESS" || match.isActive === true
-    )
-  ) {
+  if (matches.some((match) => match.status === "IN_PROGRESS")) {
     return "active";
   }
 
   return "upcoming";
+}
+
+function toVisualMatchStatus(match: CourtMatch): VisualRoundStatus {
+  if (match.status === "COMPLETED") {
+    return "completed";
+  }
+
+  if (match.status === "IN_PROGRESS") {
+    return "active";
+  }
+
+  return "upcoming";
+}
+
+function getMatchKey(roundNumber: number, courtNumber: number) {
+  return `${roundNumber}:${courtNumber}`;
+}
+
+function getCurrentOperationalRound(game: Game) {
+  return (
+    game.rounds.find((round) =>
+      round.matches.some((match) => match.status !== "COMPLETED")
+    ) ??
+    game.rounds[0] ??
+    null
+  );
+}
+
+function getAllMatches(game: Game) {
+  return game.rounds.flatMap((round) => round.matches);
+}
+
+function getNextPendingMatchesByCourt(game: Game) {
+  const matchesByCourt = new Map<number, CourtMatch[]>();
+  for (const match of getAllMatches(game)) {
+    matchesByCourt.set(match.courtNumber, [
+      ...(matchesByCourt.get(match.courtNumber) ?? []),
+      match,
+    ]);
+  }
+
+  return Array.from(matchesByCourt.entries())
+    .sort(([leftCourtNumber], [rightCourtNumber]) => leftCourtNumber - rightCourtNumber)
+    .flatMap(([, matches]) => {
+      const nextMatch = matches
+        .slice()
+        .sort((left, right) => left.roundNumber - right.roundNumber)
+        .find(
+          (match) => match.status !== "COMPLETED" && hasAssignedParticipant(match)
+        );
+
+      return nextMatch?.status === "NOT_STARTED" ? [nextMatch] : [];
+    });
+}
+
+function formatParticipantName(
+  participantId: string | null,
+  participantsById: Map<string, Participant>
+) {
+  if (!participantId) {
+    return "빈 슬롯";
+  }
+
+  return participantsById.get(participantId)?.name ?? "알 수 없음";
+}
+
+function formatTeamLine(
+  participantIds: [string | null, string | null],
+  participantsById: Map<string, Participant>
+) {
+  return participantIds
+    .map((participantId) => formatParticipantName(participantId, participantsById))
+    .join(" / ");
 }
 
 function cloneSchedule(rounds: GameRound[]): ScheduleDraftRound[] {
@@ -84,22 +241,119 @@ function cloneSchedule(rounds: GameRound[]): ScheduleDraftRound[] {
   }));
 }
 
-function buildParticipantViews(game: Game): ParticipantView[] {
-  const activeParticipantIds = new Set(
+function getMatchSlotIds(match: Pick<CourtMatch, "teamAIds" | "teamBIds">) {
+  return [
+    match.teamAIds[0],
+    match.teamAIds[1],
+    match.teamBIds[0],
+    match.teamBIds[1],
+  ] as const;
+}
+
+function hasAssignedParticipant(match: Pick<CourtMatch, "teamAIds" | "teamBIds">) {
+  return getMatchSlotIds(match).some(Boolean);
+}
+
+function findDraftMatch(
+  rounds: ScheduleDraftRound[],
+  roundNumber: number,
+  courtNumber: number
+) {
+  return rounds
+    .find((round) => round.roundNumber === roundNumber)
+    ?.matches.find((match) => match.courtNumber === courtNumber);
+}
+
+function getDraftSlotValue(
+  rounds: ScheduleDraftRound[],
+  target: ScheduleAssignmentTarget
+) {
+  const draftMatch = findDraftMatch(rounds, target.roundNumber, target.courtNumber);
+  if (!draftMatch) {
+    return null;
+  }
+
+  const slotIds = getMatchSlotIds(draftMatch);
+  return slotIds[target.slotIndex] ?? null;
+}
+
+function updateScheduleDraftSlot(
+  rounds: ScheduleDraftRound[],
+  target: ScheduleAssignmentTarget,
+  value: string | null
+) {
+  return rounds.map((round) =>
+    round.roundNumber !== target.roundNumber
+      ? round
+      : {
+          ...round,
+          matches: round.matches.map((match) => {
+            if (match.courtNumber !== target.courtNumber) {
+              return match;
+            }
+
+            if (target.slotIndex === 0 || target.slotIndex === 1) {
+              const teamAIds = [...match.teamAIds] as [string | null, string | null];
+              teamAIds[target.slotIndex] = value;
+              return { ...match, teamAIds };
+            }
+
+            const teamBIds = [...match.teamBIds] as [string | null, string | null];
+            const teamBSlotIndex = target.slotIndex === 2 ? 0 : 1;
+            teamBIds[teamBSlotIndex] = value;
+            return { ...match, teamBIds };
+          }),
+        }
+  );
+}
+
+function countAssignedMatches(rounds: ScheduleDraftRound[]) {
+  const countByParticipantId = new Map<string, number>();
+
+  for (const round of rounds) {
+    for (const match of round.matches) {
+      for (const participantId of getMatchSlotIds(match)) {
+        if (!participantId) {
+          continue;
+        }
+        countByParticipantId.set(
+          participantId,
+          (countByParticipantId.get(participantId) ?? 0) + 1
+        );
+      }
+    }
+  }
+
+  return countByParticipantId;
+}
+
+function buildParticipantViews(
+  game: Game,
+  scheduleDraft: ScheduleDraftRound[]
+): ParticipantView[] {
+  const activeMatchKeys = new Set(
     game.rounds.flatMap((round) =>
+      round.matches
+        .filter((match) => match.status === "IN_PROGRESS")
+        .map((match) => `${round.roundNumber}:${match.courtNumber}`)
+    )
+  );
+  const activeParticipantIds = new Set(
+    scheduleDraft.flatMap((round) =>
       round.matches.flatMap((match) =>
-        match.status === "IN_PROGRESS" || match.isActive
-          ? [...match.teamAIds, ...match.teamBIds].filter(
+        activeMatchKeys.has(`${round.roundNumber}:${match.courtNumber}`)
+          ? getMatchSlotIds(match).filter(
               (participantId): participantId is string => Boolean(participantId)
             )
           : []
       )
     )
   );
+  const assignedMatchCountByParticipantId = countAssignedMatches(scheduleDraft);
 
   return game.participants.map((participant) => ({
     ...participant,
-    gamesAssigned: participant.assignedMatchCount,
+    gamesAssigned: assignedMatchCountByParticipantId.get(participant.id) ?? 0,
     status: activeParticipantIds.has(participant.id) ? "playing" : "resting",
   }));
 }
@@ -130,19 +384,197 @@ function validateSchedule(rounds: ScheduleDraftRound[]) {
   return "";
 }
 
+function buildDisplayRoundGroups(
+  game: Game,
+  scheduleDraft: ScheduleDraftRound[]
+): DisplayRoundGroup[] {
+  const participantsById = new Map(
+    game.participants.map((participant) => [participant.id, participant] as const)
+  );
+
+  return scheduleDraft.map((draftRound) => {
+    const sourceRound = game.rounds.find(
+      (round) => round.roundNumber === draftRound.roundNumber
+    );
+
+    return {
+      roundNumber: draftRound.roundNumber,
+      visualStatus: sourceRound ? toVisualRoundStatus(sourceRound.matches) : "upcoming",
+      courts: draftRound.matches.map((draftMatch) => {
+        const sourceMatch = sourceRound?.matches.find(
+          (match) => match.courtNumber === draftMatch.courtNumber
+        );
+        const displayMatch: CourtMatch = {
+          roundNumber: draftRound.roundNumber,
+          courtNumber: draftMatch.courtNumber,
+          teamAIds: draftMatch.teamAIds,
+          teamBIds: draftMatch.teamBIds,
+          status: sourceMatch?.status ?? "NOT_STARTED",
+          result: sourceMatch?.result ?? null,
+          teamAScore: sourceMatch?.teamAScore ?? null,
+          teamBScore: sourceMatch?.teamBScore ?? null,
+          isActive: sourceMatch?.isActive ?? false,
+        };
+
+        return {
+          match: displayMatch,
+          participants: getMatchSlotIds(displayMatch).map((participantId) =>
+            participantId ? participantsById.get(participantId) : undefined
+          ),
+        };
+      }),
+    };
+  });
+}
+
+function createParticipantAliasMaps(participants: Participant[]) {
+  const aliasByParticipantId = new Map<string, number>();
+  const participantIdByAlias = new Map<number, string>();
+
+  participants.forEach((participant, index) => {
+    const alias = index + 1;
+    aliasByParticipantId.set(participant.id, alias);
+    participantIdByAlias.set(alias, participant.id);
+  });
+
+  return { aliasByParticipantId, participantIdByAlias };
+}
+
+function buildGameDetailAssignmentPreviewRequest({
+  game,
+  scheduleDraft,
+  existingAssignmentPolicy,
+  aliasByParticipantId,
+}: {
+  game: Game;
+  scheduleDraft: ScheduleDraftRound[];
+  existingAssignmentPolicy: AssignmentPreviewExistingAssignmentPolicy;
+  aliasByParticipantId: Map<string, number>;
+}): CreateGameAssignmentPreviewRequest {
+  const gamesAssignedByParticipantId = countAssignedMatches(scheduleDraft);
+
+  return {
+    participants: game.participants.map((participant) => ({
+      participantId: aliasByParticipantId.get(participant.id) ?? 0,
+      gender: participant.gender,
+      ageGroup: participant.ageGroup,
+      grade: toBackendGrade(participant.grade) ?? "초심",
+      gamesAssigned: gamesAssignedByParticipantId.get(participant.id) ?? 0,
+    })),
+    rounds: scheduleDraft.map((round) => ({
+      roundNumber: round.roundNumber,
+      courts: round.matches.map((match) => ({
+        courtNumber: match.courtNumber,
+        slots:
+          existingAssignmentPolicy === "REASSIGN_ALL"
+            ? [null, null, null, null]
+            : (getMatchSlotIds(match).map((participantId) =>
+                participantId ? (aliasByParticipantId.get(participantId) ?? null) : null
+              ) as [number | null, number | null, number | null, number | null]),
+      })),
+    })),
+    partnerPairs: [],
+    preferences: {
+      partnerPolicy: "IGNORE_PARTNERS",
+      existingAssignmentPolicy,
+    },
+  };
+}
+
+function applyGameDetailAssignmentPreview({
+  preview,
+  scheduleDraft,
+  participantIdByAlias,
+}: {
+  preview: CreateGameAssignmentPreviewResponse;
+  scheduleDraft: ScheduleDraftRound[];
+  participantIdByAlias: Map<number, string>;
+}) {
+  if (!Array.isArray(preview.rounds) || preview.rounds.length !== scheduleDraft.length) {
+    throw new DetailAssignmentPreviewContractError();
+  }
+
+  const nextScheduleDraft = scheduleDraft.map((round, roundIndex) => {
+    const previewRound = preview.rounds[roundIndex];
+
+    if (
+      !previewRound ||
+      previewRound.roundNumber !== round.roundNumber ||
+      !Array.isArray(previewRound.courts) ||
+      previewRound.courts.length !== round.matches.length
+    ) {
+      throw new DetailAssignmentPreviewContractError();
+    }
+
+    return {
+      ...round,
+      matches: round.matches.map((match, matchIndex) => {
+        const previewCourt = previewRound.courts[matchIndex];
+
+        if (
+          !previewCourt ||
+          previewCourt.courtNumber !== match.courtNumber ||
+          !Array.isArray(previewCourt.slots) ||
+          previewCourt.slots.length !== 4
+        ) {
+          throw new DetailAssignmentPreviewContractError();
+        }
+
+        const nextIds = previewCourt.slots.map((participantAlias) => {
+          if (participantAlias === null) {
+            return null;
+          }
+
+          const participantId = participantIdByAlias.get(participantAlias);
+          if (!participantId) {
+            throw new DetailAssignmentPreviewContractError();
+          }
+
+          return participantId;
+        }) as [string | null, string | null, string | null, string | null];
+
+        return {
+          ...match,
+          teamAIds: [nextIds[0], nextIds[1]] as [string | null, string | null],
+          teamBIds: [nextIds[2], nextIds[3]] as [string | null, string | null],
+        };
+      }),
+    };
+  });
+
+  const validationError = validateSchedule(nextScheduleDraft);
+  if (validationError) {
+    throw new DetailAssignmentPreviewContractError();
+  }
+
+  return nextScheduleDraft;
+}
+
 const BadmintonCourt = ({
   court,
   status,
+  isEditable = false,
+  isInteractionDisabled = false,
+  selectedTargetSlot = null,
+  onSelectSlot,
 }: {
   court: {
     match: CourtMatch;
     participants: (Participant | undefined)[];
   };
   status: VisualRoundStatus;
+  isEditable?: boolean;
+  isInteractionDisabled?: boolean;
+  selectedTargetSlot?: number | null;
+  onSelectSlot?: (slotIndex: 0 | 1 | 2 | 3) => void;
 }) => {
   const isCompleted = status === "completed";
   const isActive = status === "active";
-  const resultLabel = toResultLabel(court.match.result ?? null);
+  const resultLabel =
+    court.match.teamAScore != null && court.match.teamBScore != null
+      ? `${court.match.teamAScore}:${court.match.teamBScore}`
+      : toResultLabel(court.match.result ?? null);
+  const slotParticipantIds = getMatchSlotIds(court.match);
 
   return (
     <div
@@ -212,7 +644,55 @@ const BadmintonCourt = ({
             key={`${court.match.roundNumber}-${court.match.courtNumber}-${index}`}
             className="flex items-center justify-center p-1"
           >
-            {participant ? (
+            {isEditable ? (
+              <button
+                type="button"
+                disabled={isInteractionDisabled}
+                onClick={() => onSelectSlot?.(index as 0 | 1 | 2 | 3)}
+                className={`flex h-full w-full items-center justify-center transition ${
+                  isInteractionDisabled ? "cursor-not-allowed" : "cursor-pointer"
+                }`}
+              >
+                {participant ? (
+                  <div
+                    className={`flex min-w-[70px] max-w-[95%] items-center justify-center rounded-none border-2 px-2 py-1 ${
+                      selectedTargetSlot === index
+                        ? "border-teal-500 bg-teal-100 text-teal-950 ring-2 ring-teal-300/60"
+                        : isCompleted
+                        ? "border-zinc-900 bg-zinc-700 text-zinc-400"
+                        : isActive
+                        ? "border-slate-900 bg-white text-slate-900 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)]"
+                        : "border-zinc-400 bg-white text-zinc-600 shadow-[2px_2px_0px_0px_rgba(161,161,170,1)]"
+                    }`}
+                  >
+                    <div className="w-full truncate text-center text-[10px] leading-none font-bold">
+                      {participant.name}
+                      <span
+                        className={`ml-0.5 text-[9px] font-mono uppercase tracking-widest ${
+                          isCompleted ? "text-zinc-500" : "text-slate-500"
+                        }`}
+                      >
+                        {" "}
+                        · {participant.gender === "MALE" ? "M" : "F"}/
+                        {participant.ageGroup}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className={`flex min-h-8 min-w-[56px] max-w-[78px] items-center justify-center rounded-none border-2 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em] ${
+                      selectedTargetSlot === index
+                        ? "border-teal-500 bg-teal-100 text-teal-900 ring-2 ring-teal-300/60"
+                        : isInteractionDisabled
+                        ? "border-zinc-300 bg-zinc-100 text-zinc-400"
+                        : "border-slate-900 bg-teal-400 text-slate-900 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] hover:bg-teal-300"
+                    }`}
+                  >
+                    등록
+                  </div>
+                )}
+              </button>
+            ) : participant ? (
               <div
                 className={`flex min-w-[70px] max-w-[95%] items-center justify-center rounded-none border-2 px-2 py-1 ${
                   isCompleted
@@ -238,7 +718,9 @@ const BadmintonCourt = ({
             ) : (
               <div
                 className={`h-1.5 w-1.5 rounded-none ${
-                  isCompleted
+                  slotParticipantIds[index]
+                    ? "bg-zinc-700"
+                    : isCompleted
                     ? "bg-zinc-700"
                     : isActive
                     ? "bg-white/30"
@@ -262,10 +744,25 @@ export default function ManagerGameDetailPage() {
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
   const [scheduleDraft, setScheduleDraft] = useState<ScheduleDraftRound[]>([]);
-  const [isEditingSettings, setIsEditingSettings] = useState(false);
-  const [isEditingSchedule, setIsEditingSchedule] = useState(false);
+  const [editMode, setEditMode] = useState<EditMode>(null);
   const [operationSubmitting, setOperationSubmitting] = useState(false);
-  const [copyLabel, setCopyLabel] = useState("Share");
+  const [isAiPreviewSubmitting, setIsAiPreviewSubmitting] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
+  const [scheduleError, setScheduleError] = useState("");
+  const [aiPreviewError, setAiPreviewError] = useState("");
+  const [operationError, setOperationError] = useState("");
+  const [scoreDrafts, setScoreDrafts] = useState<Record<string, MatchScoreDraft>>({});
+  const [selectedScheduleTarget, setSelectedScheduleTarget] =
+    useState<ScheduleAssignmentTarget | null>(null);
+  const [existingAssignmentPolicy, setExistingAssignmentPolicy] =
+    useState<AssignmentPreviewExistingAssignmentPolicy>("FILL_EMPTY_SLOTS");
+  const [copyLabel, setCopyLabel] = useState("공유");
+  const [participantDraft, setParticipantDraft] = useState<ParticipantDraft>(
+    DEFAULT_PARTICIPANT_DRAFT
+  );
+  const [participantError, setParticipantError] = useState("");
+  const [isParticipantSubmitting, setIsParticipantSubmitting] = useState(false);
+  const [isParticipantManagerOpen, setIsParticipantManagerOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn && gameId) {
@@ -307,6 +804,14 @@ export default function ManagerGameDetailPage() {
           gradeType: nextGame.gradeType,
         });
         setScheduleDraft(cloneSchedule(nextGame.rounds));
+        setEditMode(null);
+        setSettingsError("");
+        setScheduleError("");
+        setAiPreviewError("");
+        setOperationError("");
+        setParticipantError("");
+        setScoreDrafts({});
+        setSelectedScheduleTarget(null);
       } catch (error) {
         if (!cancelled) {
           setPageError(
@@ -342,47 +847,50 @@ export default function ManagerGameDetailPage() {
         gradeType: nextGame.gradeType,
       });
       setScheduleDraft(cloneSchedule(nextGame.rounds));
+      setOperationError("");
     }
   };
 
-  const roundGroups = useMemo(() => {
+  const displayRoundGroups = useMemo(() => {
     if (!game) {
       return [];
     }
 
-    return game.rounds.map((round) => ({
-      roundNumber: round.roundNumber,
-      visualStatus: toVisualRoundStatus(round.matches),
-      courts: round.matches.map((match) => ({
-        match,
-        participants: [
-          game.participants.find((participant) => participant.id === match.teamAIds[0]),
-          game.participants.find((participant) => participant.id === match.teamAIds[1]),
-          game.participants.find((participant) => participant.id === match.teamBIds[0]),
-          game.participants.find((participant) => participant.id === match.teamBIds[1]),
-        ],
-      })),
-    }));
-  }, [game]);
+    return buildDisplayRoundGroups(game, scheduleDraft);
+  }, [game, scheduleDraft]);
 
   const participantViews = useMemo(
-    () => (game ? buildParticipantViews(game) : []),
+    () => (game ? buildParticipantViews(game, scheduleDraft) : []),
+    [game, scheduleDraft]
+  );
+
+  const participantById = useMemo(
+    () => new Map(game?.participants.map((participant) => [participant.id, participant]) ?? []),
+    [game]
+  );
+  const { aliasByParticipantId, participantIdByAlias } = useMemo(
+    () => createParticipantAliasMaps(game?.participants ?? []),
     [game]
   );
 
-  const participantOptions = useMemo(
-    () =>
-      (game?.participants ?? []).map((participant) => ({
-        value: participant.id,
-        label: `${participant.name} · ${
-          participant.gender === "MALE" ? "M" : "F"
-        }/${participant.ageGroup}`,
-      })),
-    [game]
+  const activeRound = displayRoundGroups.find(
+    (round) => round.visualStatus === "active"
   );
-
-  const activeRound = roundGroups.find((round) => round.visualStatus === "active");
+  const currentOperationalRound = game ? getCurrentOperationalRound(game) : null;
+  const allMatches = game ? getAllMatches(game) : [];
+  const pendingMatches = game ? getNextPendingMatchesByCourt(game) : [];
+  const activeMatches = allMatches.filter((match) => match.status === "IN_PROGRESS");
+  const operationalRoundNumber =
+    activeMatches[0]?.roundNumber ??
+    pendingMatches[0]?.roundNumber ??
+    currentOperationalRound?.roundNumber ??
+    null;
   const isOperator = !!game;
+  const isEditingSettings = editMode === "settings";
+  const isEditingSchedule = editMode === "schedule";
+  const isBusy = operationSubmitting || isAiPreviewSubmitting || isParticipantSubmitting;
+  const isScheduleInteractionDisabled = isBusy || !isEditingSchedule;
+  const canAddParticipant = game?.status !== "COMPLETED";
 
   const handleCopyShareLink = async () => {
     if (!game) {
@@ -392,45 +900,135 @@ export default function ManagerGameDetailPage() {
     await navigator.clipboard.writeText(
       `${window.location.origin}/court-manager/share/${game.shareCode}`
     );
-    setCopyLabel("Copied");
-    window.setTimeout(() => setCopyLabel("Share"), 1200);
+    setCopyLabel("복사됨");
+    window.setTimeout(() => setCopyLabel("공유"), 1200);
   };
 
-  const updateDraftSlot = (
+  const openSettingsEditor = () => {
+    if (!game) {
+      return;
+    }
+    setSettingsError("");
+    setScheduleError("");
+    setAiPreviewError("");
+    setSelectedScheduleTarget(null);
+    setSettingsDraft({
+      title: game.title,
+      matchRecordMode: game.matchRecordMode,
+      gradeType: game.gradeType,
+    });
+    setEditMode("settings");
+  };
+
+  const closeSettingsEditor = () => {
+    if (!game) {
+      return;
+    }
+    setSettingsError("");
+    setSettingsDraft({
+      title: game.title,
+      matchRecordMode: game.matchRecordMode,
+      gradeType: game.gradeType,
+    });
+    setEditMode(null);
+  };
+
+  const openScheduleEditor = () => {
+    if (!game) {
+      return;
+    }
+    setScheduleError("");
+    setAiPreviewError("");
+    setSettingsError("");
+    setSelectedScheduleTarget(null);
+    setScheduleDraft(cloneSchedule(game.rounds));
+    setEditMode("schedule");
+  };
+
+  const closeScheduleEditor = () => {
+    if (!game) {
+      return;
+    }
+    setScheduleDraft(cloneSchedule(game.rounds));
+    setScheduleError("");
+    setAiPreviewError("");
+    setSelectedScheduleTarget(null);
+    setEditMode(null);
+  };
+
+  const getParticipantAssignmentConflict = (participantId: string) => {
+    if (!selectedScheduleTarget) {
+      return "";
+    }
+
+    const targetRound = scheduleDraft.find(
+      (round) => round.roundNumber === selectedScheduleTarget.roundNumber
+    );
+    if (!targetRound) {
+      return "";
+    }
+
+    for (const match of targetRound.matches) {
+      const slotIds = getMatchSlotIds(match);
+
+      for (let slotIndex = 0; slotIndex < slotIds.length; slotIndex += 1) {
+        const currentParticipantId = slotIds[slotIndex];
+        if (!currentParticipantId || currentParticipantId !== participantId) {
+          continue;
+        }
+
+        const isSameTarget =
+          match.courtNumber === selectedScheduleTarget.courtNumber &&
+          slotIndex === selectedScheduleTarget.slotIndex;
+        if (isSameTarget) {
+          continue;
+        }
+
+        if (match.courtNumber === selectedScheduleTarget.courtNumber) {
+          return "같은 코트에 이미 배정됨";
+        }
+
+        return `라운드 ${selectedScheduleTarget.roundNumber}의 다른 코트에 이미 배정됨`;
+      }
+    }
+
+    return "";
+  };
+
+  const handleSelectScheduleTarget = (
     roundNumber: number,
     courtNumber: number,
-    team: "A" | "B",
-    slotIndex: 0 | 1,
-    value: string
+    slotIndex: 0 | 1 | 2 | 3
   ) => {
+    if (isScheduleInteractionDisabled) {
+      return;
+    }
+
+    setScheduleError("");
+    setAiPreviewError("");
+    setSelectedScheduleTarget({ roundNumber, courtNumber, slotIndex });
+  };
+
+  const closeScheduleAssignmentModal = () => {
+    setSelectedScheduleTarget(null);
+  };
+
+  const assignParticipantToTarget = (participantId: string | null) => {
+    if (!selectedScheduleTarget || isScheduleInteractionDisabled) {
+      return;
+    }
+
+    if (participantId) {
+      const assignmentConflict = getParticipantAssignmentConflict(participantId);
+      if (assignmentConflict) {
+        return;
+      }
+    }
+
     setScheduleDraft((prev) =>
-      prev.map((round) =>
-        round.roundNumber !== roundNumber
-          ? round
-          : {
-              ...round,
-              matches: round.matches.map((match) => {
-                if (match.courtNumber !== courtNumber) {
-                  return match;
-                }
-
-                const nextIds =
-                  team === "A" ? [...match.teamAIds] : [...match.teamBIds];
-                nextIds[slotIndex] = value || null;
-
-                return team === "A"
-                  ? {
-                      ...match,
-                      teamAIds: nextIds as [string | null, string | null],
-                    }
-                  : {
-                      ...match,
-                      teamBIds: nextIds as [string | null, string | null],
-                    };
-              }),
-            }
-      )
+      updateScheduleDraftSlot(prev, selectedScheduleTarget, participantId)
     );
+    setSelectedScheduleTarget(null);
   };
 
   const handleSaveSettings = async () => {
@@ -438,13 +1036,21 @@ export default function ManagerGameDetailPage() {
       return;
     }
 
+    const trimmedTitle = settingsDraft.title.trim();
+    if (!trimmedTitle) {
+      setSettingsError("게임 이름을 입력해주세요.");
+      return;
+    }
+
     setOperationSubmitting(true);
-    setPageError("");
-    const success = await updateGame(game.id, settingsDraft);
+    setSettingsError("");
+    const success = await updateGame(game.id, {
+      title: trimmedTitle,
+    });
     if (!success) {
-      setPageError("기본 정보 저장에 실패했습니다.");
+      setSettingsError("게임 이름 저장에 실패했습니다.");
     } else {
-      setIsEditingSettings(false);
+      setEditMode(null);
       await reloadGame();
     }
     setOperationSubmitting(false);
@@ -457,21 +1063,518 @@ export default function ManagerGameDetailPage() {
 
     const validationError = validateSchedule(scheduleDraft);
     if (validationError) {
-      setPageError(validationError);
+      setScheduleError(validationError);
       return;
     }
 
     setOperationSubmitting(true);
-    setPageError("");
+    setScheduleError("");
+    setAiPreviewError("");
     const success = await updateGameSchedule(game.id, scheduleDraft);
     if (!success) {
-      setPageError("대진표 저장에 실패했습니다.");
+      setScheduleError("대진표 저장에 실패했습니다.");
     } else {
-      setIsEditingSchedule(false);
+      setEditMode(null);
+      setSelectedScheduleTarget(null);
       await reloadGame();
     }
     setOperationSubmitting(false);
   };
+
+  const handleChangeMatchRecordMode = async (matchRecordMode: MatchRecordMode) => {
+    if (!game || game.status !== "NOT_STARTED" || matchRecordMode === game.matchRecordMode) {
+      return;
+    }
+
+    setOperationSubmitting(true);
+    setSettingsError("");
+    const success = await updateGame(game.id, {
+      title: game.title,
+      gradeType: game.gradeType,
+      matchRecordMode,
+    });
+    if (!success) {
+      setSettingsError("기록 방식 변경에 실패했습니다.");
+    } else {
+      await reloadGame();
+    }
+    setOperationSubmitting(false);
+  };
+
+  const handleChangeGradeType = async (gradeType: Game["gradeType"]) => {
+    if (!game || gradeType === game.gradeType) {
+      return;
+    }
+
+    setOperationSubmitting(true);
+    setSettingsError("");
+    const success = await updateGame(game.id, {
+      title: game.title,
+      matchRecordMode: game.matchRecordMode,
+      gradeType,
+    });
+    if (!success) {
+      setSettingsError("급수 기준 변경에 실패했습니다.");
+    } else {
+      await reloadGame();
+    }
+    setOperationSubmitting(false);
+  };
+
+  const handleAddParticipant = async () => {
+    if (!game || !canAddParticipant || isBusy) {
+      return;
+    }
+
+    const trimmedName = participantDraft.name.trim();
+    if (!trimmedName) {
+      setParticipantError("참가자 이름을 입력해주세요.");
+      return;
+    }
+
+    setIsParticipantSubmitting(true);
+    setParticipantError("");
+    const success = await addFreeGameParticipant(game.id, {
+      ...participantDraft,
+      name: trimmedName,
+    });
+    if (!success) {
+      setParticipantError("참가자 추가에 실패했습니다.");
+    } else {
+      setParticipantDraft((prev) => ({ ...DEFAULT_PARTICIPANT_DRAFT, gender: prev.gender }));
+      await reloadGame();
+    }
+    setIsParticipantSubmitting(false);
+  };
+
+  const handleStartGame = async () => {
+    if (!game) {
+      return;
+    }
+
+    setOperationSubmitting(true);
+    setOperationError("");
+    const success = await startFreeGame(game.id);
+    if (!success) {
+      setOperationError("자유게임 시작에 실패했습니다.");
+    } else {
+      await reloadGame();
+    }
+    setOperationSubmitting(false);
+  };
+
+  const handleStartMatch = async (roundNumber: number, courtNumber: number) => {
+    if (!game) {
+      return;
+    }
+
+    setOperationSubmitting(true);
+    setOperationError("");
+    const success = await startFreeGameMatch(game.id, roundNumber, courtNumber);
+    if (!success) {
+      setOperationError("매치 시작에 실패했습니다.");
+    } else {
+      await reloadGame();
+    }
+    setOperationSubmitting(false);
+  };
+
+  const updateScoreDraft = (
+    roundNumber: number,
+    courtNumber: number,
+    key: keyof MatchScoreDraft,
+    value: string
+  ) => {
+    const matchKey = getMatchKey(roundNumber, courtNumber);
+    setScoreDrafts((prev) => ({
+      ...prev,
+      [matchKey]: {
+        teamAScore: prev[matchKey]?.teamAScore ?? "",
+        teamBScore: prev[matchKey]?.teamBScore ?? "",
+        [key]: value,
+      },
+    }));
+  };
+
+  const handleCompleteMatch = async (
+    roundNumber: number,
+    courtNumber: number,
+    winnerTeam?: MatchWinnerTeam
+  ) => {
+    if (!game) {
+      return;
+    }
+
+    const request =
+      game.matchRecordMode === "SCORE"
+        ? (() => {
+            const scoreDraft = scoreDrafts[getMatchKey(roundNumber, courtNumber)];
+            const teamAScore = Number(scoreDraft?.teamAScore);
+            const teamBScore = Number(scoreDraft?.teamBScore);
+            if (
+              scoreDraft?.teamAScore === "" ||
+              scoreDraft?.teamBScore === "" ||
+              Number.isNaN(teamAScore) ||
+              Number.isNaN(teamBScore)
+            ) {
+              setOperationError("양 팀 점수를 모두 입력해주세요.");
+              return null;
+            }
+            if (teamAScore === teamBScore) {
+              setOperationError("점수 기록에서는 동점을 입력할 수 없습니다.");
+              return null;
+            }
+            return { teamAScore, teamBScore };
+          })()
+        : game.matchRecordMode === "WINNER_ONLY"
+        ? { winnerTeam }
+        : {};
+
+    if (request == null) {
+      return;
+    }
+
+    setOperationSubmitting(true);
+    setOperationError("");
+    const success = await completeFreeGameMatch(
+      game.id,
+      roundNumber,
+      courtNumber,
+      request
+    );
+    if (!success) {
+      setOperationError("매치 종료에 실패했습니다.");
+    } else {
+      setScoreDrafts((prev) => {
+        const next = { ...prev };
+        delete next[getMatchKey(roundNumber, courtNumber)];
+        return next;
+      });
+      await reloadGame();
+    }
+    setOperationSubmitting(false);
+  };
+
+  const handleRunScheduleAiPreview = async () => {
+    if (!game) {
+      return;
+    }
+
+    setIsAiPreviewSubmitting(true);
+    setScheduleError("");
+    setAiPreviewError("");
+    setSelectedScheduleTarget(null);
+
+    try {
+      const request = buildGameDetailAssignmentPreviewRequest({
+        game,
+        scheduleDraft,
+        existingAssignmentPolicy,
+        aliasByParticipantId,
+      });
+      const submittedJob = await createFreeGameAssignmentPreview(request);
+
+      while (true) {
+        const job = await getFreeGameAssignmentPreviewJob(submittedJob.jobId);
+
+        if (job.status === "QUEUED" || job.status === "RUNNING") {
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
+          continue;
+        }
+
+        if (job.status === "FAILED") {
+          setAiPreviewError(job.failure?.message || AI_PREVIEW_GENERIC_FAILURE_MESSAGE);
+          return;
+        }
+
+        if (!job.preview) {
+          setAiPreviewError(AI_PREVIEW_GENERIC_FAILURE_MESSAGE);
+          return;
+        }
+
+        const nextScheduleDraft = applyGameDetailAssignmentPreview({
+          preview: job.preview,
+          scheduleDraft,
+          participantIdByAlias,
+        });
+        setScheduleDraft(nextScheduleDraft);
+        return;
+      }
+    } catch (error) {
+      if (error instanceof DetailAssignmentPreviewContractError) {
+        setAiPreviewError(error.message);
+      } else {
+        setAiPreviewError(
+          getUserFacingErrorMessage(error, AI_PREVIEW_GENERIC_FAILURE_MESSAGE)
+        );
+      }
+    } finally {
+      setIsAiPreviewSubmitting(false);
+    }
+  };
+
+  const selectedScheduleTargetMeta = selectedScheduleTarget
+    ? {
+        roundNumber: selectedScheduleTarget.roundNumber,
+        courtNumber: selectedScheduleTarget.courtNumber,
+        slotNumber: selectedScheduleTarget.slotIndex + 1,
+      }
+    : null;
+  const selectedTargetParticipantId = selectedScheduleTarget
+    ? getDraftSlotValue(scheduleDraft, selectedScheduleTarget)
+    : null;
+  const selectedTargetParticipant = selectedTargetParticipantId
+    ? participantById.get(selectedTargetParticipantId) ?? null
+    : null;
+  const isRecordModeLocked = game?.status !== "NOT_STARTED";
+  const recordModeOptions: MatchRecordMode[] = [
+    "STATUS_ONLY",
+    "WINNER_ONLY",
+    "SCORE",
+  ];
+  const recordModeSelectOptions = recordModeOptions.map((mode) => ({
+    value: mode,
+    label: getMatchRecordModeLabel(mode),
+  }));
+  const assignmentPolicySelectOptions = Object.entries(
+    AI_ASSIGNMENT_POLICY_LABELS
+  ).map(([value, label]) => ({ value, label }));
+  const operationPanel = game ? (
+    <div className="border-2 border-zinc-950 bg-zinc-950 p-5 text-white">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
+            현재 운영
+          </h3>
+          <p className="mt-2 font-display text-xl font-black tracking-tight text-white">
+            {game.status === "NOT_STARTED"
+              ? "대기 게임"
+              : game.status === "COMPLETED"
+              ? "자유게임 완료"
+              : activeMatches.length > 0
+              ? "진행 중 매치 종료"
+              : "입장 대상 확인"}
+          </p>
+        </div>
+        <span className="shrink-0 rounded-none border border-emerald-500/30 bg-emerald-500/15 px-2 py-1 text-[10px] font-mono font-bold text-emerald-300">
+          {operationalRoundNumber
+            ? `R${String(operationalRoundNumber).padStart(2, "0")}`
+            : "DONE"}
+        </span>
+      </div>
+
+      {operationError ? (
+        <div className="mb-4 border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200">
+          {operationError}
+        </div>
+      ) : null}
+
+      {game.status === "NOT_STARTED" ? (
+        <div className="space-y-4">
+          {pendingMatches.length > 0 ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                <span>입장 큐</span>
+                <span>{pendingMatches.length}코트</span>
+              </div>
+              {pendingMatches.map((match) => (
+                <div
+                  key={getMatchKey(match.roundNumber, match.courtNumber)}
+                  className="border border-zinc-800 bg-zinc-900/70 px-3 py-2.5"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-300">
+                      코트 {String(match.courtNumber).padStart(2, "0")}
+                    </span>
+                    <span className="text-[10px] font-bold text-zinc-500">
+                      R{String(match.roundNumber).padStart(2, "0")}
+                    </span>
+                  </div>
+                  <div className="space-y-1 text-xs font-bold text-zinc-200">
+                    <div>
+                      <span className="mr-2 text-emerald-300">A</span>
+                      {formatTeamLine(match.teamAIds, participantById)}
+                    </div>
+                    <div>
+                      <span className="mr-2 text-emerald-300">B</span>
+                      {formatTeamLine(match.teamBIds, participantById)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="border border-zinc-800 bg-zinc-900/70 px-3 py-4 text-sm font-bold text-zinc-200">
+              입장 대상이 없습니다. 대진표를 편집해 참가자를 배정해주세요.
+            </div>
+          )}
+          <Button
+            className="h-12 w-full rounded-none bg-emerald-500 text-xs font-black tracking-widest text-zinc-950 hover:bg-emerald-400"
+            onClick={() => void handleStartGame()}
+            disabled={isBusy || pendingMatches.length === 0}
+          >
+            자유게임 시작
+          </Button>
+        </div>
+      ) : game.status === "COMPLETED" ? (
+        <div className="border border-zinc-800 bg-zinc-900/70 px-3 py-4 text-sm font-bold text-zinc-200">
+          모든 매치가 종료되었습니다.
+        </div>
+      ) : activeMatches.length > 0 ? (
+        <div className="space-y-3">
+          {activeMatches.map((match) => {
+            const matchKey = getMatchKey(match.roundNumber, match.courtNumber);
+            const scoreDraft = scoreDrafts[matchKey] ?? {
+              teamAScore: "",
+              teamBScore: "",
+            };
+
+            return (
+              <div key={matchKey} className="border border-emerald-500/40 bg-emerald-500/10 p-3">
+                <div className="mb-2 text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-200">
+                  코트 {String(match.courtNumber).padStart(2, "0")} 진행 중
+                </div>
+                <div className="text-xs text-zinc-100">
+                  A {formatTeamLine(match.teamAIds, participantById)}
+                </div>
+                <div className="mt-1 text-xs text-zinc-100">
+                  B {formatTeamLine(match.teamBIds, participantById)}
+                </div>
+
+                {game.matchRecordMode === "STATUS_ONLY" ? (
+                  <Button
+                    className="mt-3 h-10 w-full rounded-none bg-white text-xs font-bold text-zinc-950 hover:bg-zinc-200"
+                    onClick={() =>
+                      void handleCompleteMatch(match.roundNumber, match.courtNumber)
+                    }
+                    disabled={isBusy}
+                  >
+                    매치 종료
+                  </Button>
+                ) : game.matchRecordMode === "WINNER_ONLY" ? (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Button
+                      className="h-10 rounded-none bg-white text-xs font-bold text-zinc-950 hover:bg-zinc-200"
+                      onClick={() =>
+                        void handleCompleteMatch(
+                          match.roundNumber,
+                          match.courtNumber,
+                          "TEAM_A"
+                        )
+                      }
+                      disabled={isBusy}
+                    >
+                      A팀 승
+                    </Button>
+                    <Button
+                      className="h-10 rounded-none bg-white text-xs font-bold text-zinc-950 hover:bg-zinc-200"
+                      onClick={() =>
+                        void handleCompleteMatch(
+                          match.roundNumber,
+                          match.courtNumber,
+                          "TEAM_B"
+                        )
+                      }
+                      disabled={isBusy}
+                    >
+                      B팀 승
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
+                    <input
+                      inputMode="numeric"
+                      value={scoreDraft.teamAScore}
+                      onChange={(event) =>
+                        updateScoreDraft(
+                          match.roundNumber,
+                          match.courtNumber,
+                          "teamAScore",
+                          event.target.value.replace(/\D/g, "")
+                        )
+                      }
+                      className="h-10 min-w-0 rounded-none border-2 border-zinc-700 bg-zinc-950 px-2 text-center text-sm font-bold text-white focus:border-emerald-400 focus:outline-none"
+                      placeholder="A"
+                    />
+                    <input
+                      inputMode="numeric"
+                      value={scoreDraft.teamBScore}
+                      onChange={(event) =>
+                        updateScoreDraft(
+                          match.roundNumber,
+                          match.courtNumber,
+                          "teamBScore",
+                          event.target.value.replace(/\D/g, "")
+                        )
+                      }
+                      className="h-10 min-w-0 rounded-none border-2 border-zinc-700 bg-zinc-950 px-2 text-center text-sm font-bold text-white focus:border-emerald-400 focus:outline-none"
+                      placeholder="B"
+                    />
+                    <Button
+                      className="h-10 rounded-none bg-white px-3 text-xs font-bold text-zinc-950 hover:bg-zinc-200"
+                      onClick={() =>
+                        void handleCompleteMatch(match.roundNumber, match.courtNumber)
+                      }
+                      disabled={isBusy}
+                    >
+                      종료
+                    </Button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {pendingMatches.length > 0 ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                <span>입장 큐</span>
+                <span>{pendingMatches.length}코트</span>
+              </div>
+              {pendingMatches.map((match) => (
+                <div
+                  key={getMatchKey(match.roundNumber, match.courtNumber)}
+                  className="border border-zinc-800 bg-zinc-900/70 p-3"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-300">
+                      코트 {String(match.courtNumber).padStart(2, "0")}
+                    </span>
+                    <span className="text-[10px] font-bold text-zinc-500">
+                      R{String(match.roundNumber).padStart(2, "0")}
+                    </span>
+                  </div>
+                  <div className="space-y-1 text-xs font-bold text-zinc-200">
+                    <div>
+                      <span className="mr-2 text-emerald-300">A</span>
+                      {formatTeamLine(match.teamAIds, participantById)}
+                    </div>
+                    <div>
+                      <span className="mr-2 text-emerald-300">B</span>
+                      {formatTeamLine(match.teamBIds, participantById)}
+                    </div>
+                  </div>
+                  <Button
+                    className="mt-3 h-10 w-full rounded-none bg-emerald-500 text-xs font-black tracking-widest text-zinc-950 hover:bg-emerald-400"
+                    onClick={() => void handleStartMatch(match.roundNumber, match.courtNumber)}
+                    disabled={isBusy}
+                  >
+                    매치 시작
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="border border-zinc-800 bg-zinc-900/70 px-3 py-4 text-sm font-bold text-zinc-200">
+              입장 대상이 없습니다. 대진표를 편집해 참가자를 배정해주세요.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  ) : null;
 
   if (isLoading || isPageLoading) {
     return (
@@ -529,9 +1632,8 @@ export default function ManagerGameDetailPage() {
           </div>
           <div className="flex items-center gap-2">
             <Button
-              variant="outline"
               size="sm"
-              className="hidden h-9 rounded-none border-zinc-700 text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-300 hover:bg-zinc-800 hover:text-white sm:flex"
+              className="hidden h-9 rounded-none border-2 border-zinc-700 bg-zinc-900 px-3 text-[10px] font-mono font-bold tracking-widest text-zinc-100 shadow-none hover:bg-zinc-800 sm:flex"
               onClick={() => void handleCopyShareLink()}
             >
               <Copy className="mr-2 h-3 w-3" />
@@ -550,139 +1652,267 @@ export default function ManagerGameDetailPage() {
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
           <div className="space-y-8 lg:col-span-8">
-            <div className="flex flex-col justify-between gap-4 border-2 border-zinc-200 bg-white p-6 sm:flex-row sm:items-center">
-              <div>
-                <h2 className="mb-2 font-display text-2xl font-black uppercase tracking-tight text-zinc-950 sm:hidden">
-                  {game.title}
-                </h2>
-                <div className="flex flex-wrap items-center gap-4 text-xs font-mono font-bold uppercase tracking-widest text-zinc-500">
-                  <div className="flex items-center gap-1.5">
-                    <Calendar className="h-4 w-4 text-zinc-400" />
-                    {getMatchRecordModeLabel(game.matchRecordMode)}
+            <div className="border-2 border-zinc-200 bg-white px-4 py-4 sm:px-5">
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 lg:max-w-[42%]">
+                    <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
+                      기본 정보
+                    </div>
+
+                    {isEditingSettings ? (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2 sm:flex-nowrap">
+                        <input
+                          value={settingsDraft.title}
+                          onChange={(event) =>
+                            setSettingsDraft((prev) =>
+                              prev ? { ...prev, title: event.target.value } : prev
+                            )
+                          }
+                          onKeyDown={(event) => {
+                            if (event.nativeEvent.isComposing) {
+                              return;
+                            }
+
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void handleSaveSettings();
+                            }
+
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              closeSettingsEditor();
+                            }
+                          }}
+                          autoFocus
+                          className="h-10 min-w-[180px] flex-1 rounded-none border-0 border-b-2 border-zinc-300 bg-transparent px-0 font-display text-2xl font-black tracking-tight text-zinc-950 focus:border-zinc-900 focus:outline-none"
+                          placeholder="세션 이름"
+                        />
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            className="h-9 rounded-none bg-zinc-950 px-3 text-xs font-bold text-white hover:bg-zinc-800"
+                            onClick={() => void handleSaveSettings()}
+                            disabled={operationSubmitting}
+                          >
+                            저장
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-9 rounded-none px-2 text-xs font-bold text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
+                            onClick={closeSettingsEditor}
+                            disabled={operationSubmitting}
+                          >
+                            취소
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-1.5 flex min-w-0 items-center gap-2">
+                        <h2 className="truncate font-display text-2xl font-black uppercase tracking-tight text-zinc-950">
+                          {game.title}
+                        </h2>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 rounded-none text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
+                          onClick={openSettingsEditor}
+                          disabled={isBusy}
+                          aria-label="게임 제목 수정"
+                        >
+                          <PencilLine className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <Users className="h-4 w-4 text-zinc-400" />
-                    {game.participants.length} Participants
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Settings2 className="h-4 w-4 text-zinc-400" />
-                    {getGradeTypeLabel(game.gradeType)}
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-end lg:max-w-[25rem] xl:max-w-[30rem]">
+                    <label className="block min-w-0 sm:w-40">
+                      <span className="mb-1 block text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
+                        기록 방식
+                      </span>
+                      <Select
+                        variant="brutalist"
+                        size="compact"
+                        value={game.matchRecordMode}
+                        options={recordModeSelectOptions}
+                        disabled={isRecordModeLocked || isBusy}
+                        onChange={(value) =>
+                          void handleChangeMatchRecordMode(value as MatchRecordMode)
+                        }
+                      />
+                      {isRecordModeLocked ? (
+                        <span className="mt-1 block text-[10px] font-bold text-zinc-400">
+                          시작 후 변경 불가
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="block min-w-0 sm:w-36">
+                      <span className="mb-1 block text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
+                        급수 기준
+                      </span>
+                      <Select
+                        variant="brutalist"
+                        size="compact"
+                        value={game.gradeType}
+                        options={GRADE_TYPE_OPTIONS}
+                        disabled={isBusy}
+                        onChange={(value) =>
+                          void handleChangeGradeType(value as Game["gradeType"])
+                        }
+                      />
+                    </label>
                   </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-6">
-                <div className="text-center">
-                  <div className="mb-1 text-[10px] font-mono uppercase tracking-widest text-zinc-400">
-                    Courts
+
+                {settingsError ? (
+                  <div className="border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+                    {settingsError}
                   </div>
-                  <div className="font-display text-xl font-bold text-zinc-950">
-                    {String(game.courtCount).padStart(2, "0")}
-                  </div>
-                </div>
-                <div className="h-10 w-px bg-zinc-200" />
-                <div className="text-center">
-                  <div className="mb-1 text-[10px] font-mono uppercase tracking-widest text-zinc-400">
-                    Round
-                  </div>
-                  <div className="font-display text-xl font-bold text-emerald-600">
-                    {String(
-                      activeRound?.roundNumber || roundGroups[0]?.roundNumber || 1
-                    ).padStart(2, "0")}
-                    <span className="text-zinc-300">
-                      /{String(roundGroups.length).padStart(2, "0")}
+                ) : null}
+
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-zinc-100 pt-3 text-xs font-mono font-bold uppercase tracking-widest text-zinc-500">
+                  <span className="inline-flex items-baseline gap-2">
+                    <span className="text-zinc-400">상태</span>
+                    <span className="text-zinc-950">{getGameStatusLabel(game.status)}</span>
+                  </span>
+                  <span className="h-3 w-px bg-zinc-200" />
+                  <span className="inline-flex items-baseline gap-2">
+                    <span className="text-zinc-400">참가자</span>
+                    <span className="text-zinc-950">{game.participants.length}명</span>
+                  </span>
+                  <span className="h-3 w-px bg-zinc-200" />
+                  <span className="inline-flex items-baseline gap-2">
+                    <span className="text-zinc-400">코트</span>
+                    <span className="text-zinc-950">
+                      {String(game.courtCount).padStart(2, "0")}
                     </span>
-                  </div>
+                  </span>
+                  <span className="h-3 w-px bg-zinc-200" />
+                  <span className="inline-flex items-baseline gap-2">
+                    <span className="text-zinc-400">라운드</span>
+                    <span className="text-emerald-600">
+                      {String(
+                        operationalRoundNumber ||
+                          currentOperationalRound?.roundNumber ||
+                          activeRound?.roundNumber ||
+                          displayRoundGroups[0]?.roundNumber ||
+                          1
+                      ).padStart(2, "0")}
+                      <span className="text-zinc-300">
+                        /{String(displayRoundGroups.length).padStart(2, "0")}
+                      </span>
+                    </span>
+                  </span>
                 </div>
               </div>
             </div>
 
-            {isEditingSettings && (
-              <div className="border-2 border-zinc-200 bg-white p-6">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="font-display text-xl font-bold uppercase tracking-tight text-zinc-950">
-                    기본 정보 수정
-                  </h3>
-                </div>
-                <div className="grid gap-4 md:grid-cols-3">
-                  <input
-                    value={settingsDraft.title}
-                    onChange={(event) =>
-                      setSettingsDraft((prev) =>
-                        prev ? { ...prev, title: event.target.value } : prev
-                      )
-                    }
-                    className="rounded-none border-2 border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none"
-                    placeholder="세션 이름"
-                  />
-                  <select
-                    value={settingsDraft.matchRecordMode}
-                    onChange={(event) =>
-                      setSettingsDraft((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              matchRecordMode: event.target
-                                .value as MatchRecordMode,
-                            }
-                          : prev
-                      )
-                    }
-                    className="rounded-none border-2 border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none"
-                  >
-                    <option value="RESULT">결과 기록</option>
-                    <option value="STATUS_ONLY">상태만 기록</option>
-                  </select>
-                  <select
-                    value={settingsDraft.gradeType}
-                    onChange={(event) =>
-                      setSettingsDraft((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              gradeType: event.target.value as Game["gradeType"],
-                            }
-                          : prev
-                      )
-                    }
-                    className="rounded-none border-2 border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none"
-                  >
-                    <option value="REGIONAL">지역 급수</option>
-                    <option value="NATIONAL">전국 급수</option>
-                  </select>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    className="rounded-none bg-zinc-950 text-white hover:bg-zinc-800"
-                    onClick={() => void handleSaveSettings()}
-                    disabled={operationSubmitting}
-                  >
-                    저장
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="rounded-none"
-                    onClick={() => {
-                      setIsEditingSettings(false);
-                      setSettingsDraft({
-                        title: game.title,
-                        matchRecordMode: game.matchRecordMode,
-                        gradeType: game.gradeType,
-                      });
-                    }}
-                    disabled={operationSubmitting}
-                  >
-                    취소
-                  </Button>
-                </div>
+            <div className="lg:hidden">{operationPanel}</div>
+
+            <div className="flex flex-col gap-3 border-b border-zinc-200 pb-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="font-display text-xl font-black tracking-tight text-zinc-950">
+                  대진표
+                </h2>
+                <p className="mt-1 text-xs font-mono text-zinc-500">
+                  라운드별 코트 배정과 현재 진행 상태를 확인합니다.
+                </p>
               </div>
-            )}
+              {isOperator && !isEditingSchedule ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 shrink-0 rounded-none border-zinc-300 px-4 text-xs font-bold text-zinc-700 hover:border-zinc-950 hover:bg-zinc-50 hover:text-zinc-950"
+                  onClick={openScheduleEditor}
+                  disabled={isBusy}
+                >
+                  <PencilLine className="mr-2 h-3.5 w-3.5" />
+                  수정
+                </Button>
+              ) : null}
+            </div>
+
+            {isEditingSchedule ? (
+              <div className="border-2 border-zinc-950 bg-white px-3 py-3 sm:px-4">
+                <div className="flex flex-col gap-3">
+                  <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <h3 className="font-display text-base font-black uppercase tracking-tight text-zinc-950">
+                        대진표 편집
+                      </h3>
+                      <span className="border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-700">
+                        편집 중
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-mono text-zinc-500 sm:text-right">
+                      슬롯을 눌러 참가자를 바꾸고, 저장 전까지는 임시 대진표로 유지됩니다.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 border-t border-zinc-100 pt-3 lg:grid-cols-[minmax(10rem,1fr)_11rem_6.5rem_7.5rem]">
+                    <Button
+                      className="h-11 rounded-none bg-emerald-500 px-3 text-xs font-black tracking-widest text-slate-950 hover:bg-emerald-400"
+                      onClick={() => void handleRunScheduleAiPreview()}
+                      disabled={isBusy}
+                    >
+                      {isAiPreviewSubmitting ? (
+                        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Activity className="mr-2 h-4 w-4" />
+                      )}
+                      {isAiPreviewSubmitting ? "AI 배정 중..." : "AI 자동 배정"}
+                    </Button>
+                    <Select
+                      variant="brutalist"
+                      size="compact"
+                      value={existingAssignmentPolicy}
+                      options={assignmentPolicySelectOptions}
+                      disabled={isBusy}
+                      onChange={(value) =>
+                        setExistingAssignmentPolicy(
+                          value as AssignmentPreviewExistingAssignmentPolicy
+                        )
+                      }
+                      className="min-w-0"
+                    />
+                    <Button
+                      variant="outline"
+                      className="h-11 rounded-none border-zinc-200 text-xs font-bold"
+                      onClick={closeScheduleEditor}
+                      disabled={isBusy}
+                    >
+                      변경 취소
+                    </Button>
+                    <Button
+                      className="h-11 rounded-none bg-zinc-950 px-3 text-xs font-bold text-white hover:bg-zinc-800"
+                      onClick={() => void handleSaveSchedule()}
+                      disabled={isBusy}
+                    >
+                      대진표 저장
+                    </Button>
+                  </div>
+                </div>
+
+                {scheduleError ? (
+                  <div className="mt-3 border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+                    {scheduleError}
+                  </div>
+                ) : null}
+                {aiPreviewError ? (
+                  <div className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
+                    {aiPreviewError}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="space-y-12">
-              {roundGroups.map((round) => {
-                const draftRound = scheduleDraft.find(
-                  (item) => item.roundNumber === round.roundNumber
-                );
-
+              {displayRoundGroups.map((round) => {
                 return (
                   <div key={round.roundNumber} className="relative">
                     <div className="mb-6 flex items-center gap-4">
@@ -706,10 +1936,6 @@ export default function ManagerGameDetailPage() {
 
                     <div className="grid gap-6 sm:grid-cols-2">
                       {round.courts.map((court, courtIndex) => {
-                        const draftMatch = draftRound?.matches.find(
-                          (match) => match.courtNumber === court.match.courtNumber
-                        );
-
                         return (
                           <div
                             key={`${round.roundNumber}-${court.match.courtNumber}`}
@@ -720,75 +1946,26 @@ export default function ManagerGameDetailPage() {
                                 Court {String(courtIndex + 1).padStart(2, "0")}
                               </span>
                             </div>
-                            <BadmintonCourt court={court} status={round.visualStatus} />
-
-                            {isEditingSchedule && draftMatch && (
-                              <div className="grid gap-2 border-2 border-zinc-200 bg-white p-3">
-                                <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
-                                  Team A
-                                </div>
-                                <div className="grid gap-2 sm:grid-cols-2">
-                                  {[0, 1].map((index) => (
-                                    <select
-                                      key={`teamA-${index}`}
-                                      value={draftMatch.teamAIds[index] ?? ""}
-                                      onChange={(event) =>
-                                        updateDraftSlot(
-                                          round.roundNumber,
-                                          court.match.courtNumber,
-                                          "A",
-                                          index as 0 | 1,
-                                          event.target.value
-                                        )
-                                      }
-                                      className="rounded-none border-2 border-zinc-200 px-2 py-2 text-sm focus:border-zinc-900 focus:outline-none"
-                                    >
-                                      <option value="">빈 슬롯</option>
-                                      {participantOptions.map((participant) => (
-                                        <option
-                                          key={participant.value}
-                                          value={participant.value}
-                                        >
-                                          {participant.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  ))}
-                                </div>
-
-                                <div className="pt-2 text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
-                                  Team B
-                                </div>
-                                <div className="grid gap-2 sm:grid-cols-2">
-                                  {[0, 1].map((index) => (
-                                    <select
-                                      key={`teamB-${index}`}
-                                      value={draftMatch.teamBIds[index] ?? ""}
-                                      onChange={(event) =>
-                                        updateDraftSlot(
-                                          round.roundNumber,
-                                          court.match.courtNumber,
-                                          "B",
-                                          index as 0 | 1,
-                                          event.target.value
-                                        )
-                                      }
-                                      className="rounded-none border-2 border-zinc-200 px-2 py-2 text-sm focus:border-zinc-900 focus:outline-none"
-                                    >
-                                      <option value="">빈 슬롯</option>
-                                      {participantOptions.map((participant) => (
-                                        <option
-                                          key={participant.value}
-                                          value={participant.value}
-                                        >
-                                          {participant.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                            <BadmintonCourt
+                              court={court}
+                              status={toVisualMatchStatus(court.match)}
+                              isEditable={isEditingSchedule}
+                              isInteractionDisabled={isBusy}
+                              selectedTargetSlot={
+                                selectedScheduleTarget?.roundNumber === round.roundNumber &&
+                                selectedScheduleTarget?.courtNumber ===
+                                  court.match.courtNumber
+                                  ? selectedScheduleTarget.slotIndex
+                                  : null
+                              }
+                              onSelectSlot={(slotIndex) =>
+                                handleSelectScheduleTarget(
+                                  round.roundNumber,
+                                  court.match.courtNumber,
+                                  slotIndex
+                                )
+                              }
+                            />
                           </div>
                         );
                       })}
@@ -802,60 +1979,32 @@ export default function ManagerGameDetailPage() {
           <div className="space-y-6 lg:col-span-4">
             {isOperator && (
               <>
-                <div className="border-2 border-zinc-950 bg-zinc-950 p-6 text-white">
-                  <h3 className="mb-4 text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
-                    Operations
-                  </h3>
-                  <div className="space-y-3">
-                    <Button
-                      className="h-12 w-full rounded-none bg-emerald-600 text-xs font-bold uppercase tracking-widest text-white shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)] transition-all hover:bg-emerald-500 active:translate-y-1 active:translate-x-1 active:shadow-none"
-                      onClick={() => setIsEditingSettings((prev) => !prev)}
-                      disabled={operationSubmitting}
-                    >
-                      <PencilLine className="mr-2 h-4 w-4" />
-                      {isEditingSettings ? "기본 정보 닫기" : "기본 정보 수정"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="h-12 w-full rounded-none border-zinc-700 text-xs font-bold uppercase tracking-widest text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                      onClick={() => setIsEditingSchedule((prev) => !prev)}
-                      disabled={operationSubmitting}
-                    >
-                      <Settings2 className="mr-2 h-4 w-4" />
-                      {isEditingSchedule ? "대진표 편집 닫기" : "대진표 편집"}
-                    </Button>
-                    {isEditingSchedule && (
-                      <Button
-                        className="h-12 w-full rounded-none bg-orange-500 text-xs font-bold uppercase tracking-widest text-zinc-950 hover:bg-orange-400"
-                        onClick={() => void handleSaveSchedule()}
-                        disabled={operationSubmitting}
-                      >
-                        대진표 저장
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="border-2 border-zinc-200 bg-white p-4">
-                  <h3 className="mb-3 text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
-                    Backend Contract Notes
-                  </h3>
-                  <div className="space-y-2 text-sm text-zinc-600">
-                    <p>현재 계약에서는 기존 참가자 배치와 기본 정보 수정만 지원합니다.</p>
-                    <p>결과/상태 변경, 참가자 추가, 코트 추가, 라운드 추가는 백엔드 확장 후 연결합니다.</p>
-                  </div>
-                </div>
+                <div className="hidden lg:block">{operationPanel}</div>
               </>
             )}
 
             <div className="border-2 border-zinc-200 bg-white">
-              <div className="flex items-center justify-between border-b-2 border-zinc-200 bg-zinc-50 p-4">
-                <h3 className="font-display text-sm font-bold uppercase tracking-widest text-zinc-950">
-                  Roster Status
-                </h3>
-                <span className="text-xs font-mono font-bold text-zinc-500">
-                  {participantViews.length} Total
-                </span>
+              <div className="flex items-center justify-between gap-3 border-b-2 border-zinc-200 bg-zinc-50 p-4">
+                <div>
+                  <h3 className="font-display text-sm font-bold uppercase tracking-widest text-zinc-950">
+                    참가자 현황
+                  </h3>
+                  <p className="mt-1 text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                    {participantViews.length}명
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 shrink-0 rounded-none border-zinc-200 px-3 text-xs font-bold"
+                  onClick={() => {
+                    setParticipantError("");
+                    setIsParticipantManagerOpen(true);
+                  }}
+                >
+                  <UserPlus className="mr-2 h-3.5 w-3.5" />
+                  참가자 관리
+                </Button>
               </div>
 
               <div className="max-h-[500px] divide-y-2 divide-zinc-100 overflow-y-auto">
@@ -893,7 +2042,7 @@ export default function ManagerGameDetailPage() {
                         {participant.status}
                       </div>
                       <div className="mt-1 text-xs font-bold text-zinc-500">
-                        {participant.winCount}W / {participant.lossCount}L
+                        {participant.winCount ?? "-"}W / {participant.lossCount ?? "-"}L
                       </div>
                     </div>
                   </div>
@@ -903,6 +2052,300 @@ export default function ManagerGameDetailPage() {
           </div>
         </div>
       </div>
+
+      {isParticipantManagerOpen ? (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/50 px-4 py-8"
+          onClick={() => setIsParticipantManagerOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="flex max-h-[min(88vh,44rem)] w-full max-w-3xl flex-col overflow-hidden rounded-none border-2 border-slate-900 bg-white shadow-[6px_6px_0px_0px_rgba(15,23,42,1)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b-2 border-slate-900 px-5 py-4">
+              <div>
+                <h3 className="font-display text-xl font-black tracking-tight text-slate-900">
+                  참가자 관리
+                </h3>
+                <p className="mt-1 text-xs font-mono text-slate-500">
+                  참가자를 추가하고 현재 명단을 확인합니다.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
+                onClick={() => setIsParticipantManagerOpen(false)}
+                aria-label="참가자 관리 닫기"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="grid min-h-0 flex-1 gap-0 overflow-hidden md:grid-cols-[minmax(0,1fr)_16rem]">
+              <div className="min-h-0 overflow-y-auto border-b-2 border-zinc-100 md:border-r-2 md:border-b-0">
+                <div className="flex items-center justify-between bg-zinc-50 px-4 py-3">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                    현재 명단
+                  </span>
+                  <span className="text-xs font-mono font-bold text-zinc-500">
+                    {participantViews.length}명
+                  </span>
+                </div>
+                <div className="divide-y divide-zinc-100">
+                  {participantViews.map((participant) => (
+                    <div
+                      key={participant.id}
+                      className="flex items-center justify-between gap-3 px-4 py-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-bold text-zinc-950">
+                          {participant.name}
+                        </div>
+                        <div className="mt-1 text-[10px] font-mono uppercase tracking-widest text-zinc-500">
+                          {participant.gender === "MALE" ? "M" : "F"}/
+                          {participant.ageGroup} · {formatGradeLabel(participant.grade)}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div
+                          className={`text-[10px] font-mono font-bold uppercase tracking-widest ${
+                            participant.status === "playing"
+                              ? "text-emerald-600"
+                              : "text-zinc-400"
+                          }`}
+                        >
+                          {participant.status}
+                        </div>
+                        <div className="mt-1 text-xs font-bold text-zinc-500">
+                          {participant.gamesAssigned}회
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-white p-4">
+                <div className="mb-3">
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                    참가자 추가
+                  </div>
+                  {!canAddParticipant ? (
+                    <p className="mt-1 text-xs font-bold text-zinc-400">
+                      완료된 자유게임에는 참가자를 추가할 수 없습니다.
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-2">
+                  <input
+                    value={participantDraft.name}
+                    onChange={(event) =>
+                      setParticipantDraft((prev) => ({
+                        ...prev,
+                        name: event.target.value,
+                      }))
+                    }
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) {
+                        return;
+                      }
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void handleAddParticipant();
+                      }
+                    }}
+                    disabled={!canAddParticipant || isBusy}
+                    className="h-11 min-w-0 rounded-none border-2 border-slate-200 bg-slate-50 px-3 text-sm font-bold text-zinc-900 placeholder:text-zinc-400 focus:border-slate-900 focus:bg-white focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-400"
+                    placeholder="이름"
+                  />
+                  <div className="grid grid-cols-3 gap-2">
+                    <Select
+                      variant="brutalist"
+                      size="compact"
+                      value={participantDraft.gender}
+                      options={PARTICIPANT_GENDER_OPTIONS}
+                      disabled={!canAddParticipant || isBusy}
+                      onChange={(value) =>
+                        setParticipantDraft((prev) => ({
+                          ...prev,
+                          gender: value as Gender,
+                        }))
+                      }
+                    />
+                    <Select
+                      variant="brutalist"
+                      size="compact"
+                      value={String(participantDraft.age)}
+                      options={PARTICIPANT_AGE_SELECT_OPTIONS}
+                      disabled={!canAddParticipant || isBusy}
+                      onChange={(value) =>
+                        setParticipantDraft((prev) => ({
+                          ...prev,
+                          age: Number(value) as AgeGroup,
+                        }))
+                      }
+                    />
+                    <Select
+                      variant="brutalist"
+                      size="compact"
+                      value={participantDraft.grade}
+                      options={PARTICIPANT_GRADE_SELECT_OPTIONS}
+                      disabled={!canAddParticipant || isBusy}
+                      onChange={(value) =>
+                        setParticipantDraft((prev) => ({
+                          ...prev,
+                          grade: value as Grade,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <Button
+                    type="button"
+                    className="h-11 rounded-none bg-zinc-950 text-xs font-black tracking-widest text-white hover:bg-zinc-800"
+                    onClick={() => void handleAddParticipant()}
+                    disabled={!canAddParticipant || isBusy}
+                  >
+                    {isParticipantSubmitting ? (
+                      <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <UserPlus className="mr-2 h-4 w-4" />
+                    )}
+                    참가자 추가
+                  </Button>
+                </div>
+
+                {participantError ? (
+                  <div className="mt-3 border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+                    {participantError}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedScheduleTargetMeta && isEditingSchedule ? (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/50 px-4 py-8"
+          onClick={closeScheduleAssignmentModal}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="flex max-h-[min(84vh,42rem)] w-full max-w-2xl flex-col overflow-hidden rounded-none border-2 border-slate-900 bg-white shadow-[6px_6px_0px_0px_rgba(15,23,42,1)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b-2 border-slate-900 px-5 py-4">
+              <div>
+                <h3 className="font-display text-xl font-bold text-slate-900">
+                  참가자 배정
+                </h3>
+                <p className="mt-1 text-xs font-mono text-slate-500">
+                  라운드 {String(selectedScheduleTargetMeta.roundNumber).padStart(2, "0")} ·
+                  코트 {String(selectedScheduleTargetMeta.courtNumber).padStart(2, "0")} · 슬롯{" "}
+                  {selectedScheduleTargetMeta.slotNumber}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
+                onClick={closeScheduleAssignmentModal}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-4 p-5">
+              {selectedTargetParticipant ? (
+                <div className="border-2 border-zinc-200 bg-zinc-50 px-4 py-3">
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                    현재 배정
+                  </div>
+                  <div className="mt-1 text-sm font-bold text-zinc-950">
+                    {selectedTargetParticipant.name}
+                    <span className="ml-2 text-xs font-mono font-bold uppercase tracking-widest text-zinc-500">
+                      {selectedTargetParticipant.gender === "MALE" ? "M" : "F"}/
+                      {selectedTargetParticipant.ageGroup}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  className="rounded-none border-zinc-200"
+                  onClick={() => assignParticipantToTarget(null)}
+                  disabled={isBusy}
+                >
+                  빈 슬롯으로 비우기
+                </Button>
+              </div>
+
+              <div className="max-h-[min(52vh,30rem)] overflow-y-auto border-2 border-zinc-200 bg-white">
+                {participantViews.map((participant) => {
+                  const assignmentConflict = getParticipantAssignmentConflict(
+                    participant.id
+                  );
+                  const isCurrentSelection =
+                    participant.id === selectedTargetParticipantId;
+                  const isDisabled = Boolean(assignmentConflict) && !isCurrentSelection;
+
+                  return (
+                    <button
+                      key={participant.id}
+                      type="button"
+                      disabled={isDisabled || isBusy}
+                      onClick={() => assignParticipantToTarget(participant.id)}
+                      className={`flex w-full items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3 text-left transition-colors last:border-b-0 ${
+                        isCurrentSelection
+                          ? "bg-teal-50"
+                          : isDisabled
+                          ? "cursor-not-allowed bg-zinc-50 text-zinc-400"
+                          : "hover:bg-zinc-50"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-zinc-950">
+                          {participant.name}
+                        </div>
+                        <div className="mt-1 text-[10px] font-mono uppercase tracking-widest text-zinc-500">
+                          {participant.gender === "MALE" ? "M" : "F"}/
+                          {participant.ageGroup} · {participant.gamesAssigned} Matches
+                        </div>
+                      </div>
+                      <div
+                        className={`shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest ${
+                          isDisabled
+                            ? "text-red-500"
+                            : isCurrentSelection
+                            ? "text-teal-700"
+                            : "text-zinc-500"
+                        }`}
+                      >
+                        {isDisabled
+                          ? assignmentConflict
+                          : isCurrentSelection
+                          ? "현재 배정"
+                          : "선택"}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1488,7 +1488,7 @@ export default function CreateFreeGamePage() {
           ),
           roundCount: rounds.length,
           gradeType: "REGIONAL",
-          matchRecordMode: "RESULT",
+          matchRecordMode: "WINNER_ONLY",
           scheduledAt: date,
           location: trimmedLocation,
           participants: participants.map((participant) => ({

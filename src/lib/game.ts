@@ -7,10 +7,11 @@ export type Gender = "MALE" | "FEMALE";
 export type Grade = UiGameGrade;
 export type AgeGroup = 10 | 20 | 30 | 40 | 50 | 60 | 70;
 export type GradeType = "REGIONAL" | "NATIONAL";
-export type MatchRecordMode = "RESULT" | "STATUS_ONLY";
+export type MatchRecordMode = "STATUS_ONLY" | "WINNER_ONLY" | "SCORE";
 export type GameStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
 export type MatchStatus = GameStatus | "NULL";
 export type MatchResult = "TEAM_A_WIN" | "TEAM_B_WIN" | "DRAW" | null;
+export type MatchWinnerTeam = "TEAM_A" | "TEAM_B";
 
 export interface Participant {
   id: string;
@@ -22,8 +23,8 @@ export interface Participant {
   ageGroup: AgeGroup;
   assignedMatchCount: number;
   completedMatchCount: number;
-  winCount: number;
-  lossCount: number;
+  winCount: number | null;
+  lossCount: number | null;
 }
 
 export interface CourtMatch {
@@ -33,6 +34,8 @@ export interface CourtMatch {
   teamBIds: [string | null, string | null];
   status: MatchStatus;
   result: MatchResult;
+  teamAScore: number | null;
+  teamBScore: number | null;
   isActive: boolean;
 }
 
@@ -115,6 +118,20 @@ export interface ScheduleDraftRound {
     teamAIds: [string | null, string | null];
     teamBIds: [string | null, string | null];
   }>;
+}
+
+export interface CompleteGameMatchRequest {
+  winnerTeam?: MatchWinnerTeam;
+  teamAScore?: number;
+  teamBScore?: number;
+}
+
+export interface AddGameParticipantRequest {
+  accountId?: string | null;
+  name: string;
+  gender: Gender;
+  grade: Grade;
+  age: AgeGroup;
 }
 
 export type AssignmentPreviewPartnerPolicy =
@@ -219,8 +236,8 @@ interface FreeGameParticipantResponse {
   ageGroup: number;
   assignedMatchCount: number;
   completedMatchCount: number;
-  winCount: number;
-  lossCount: number;
+  winCount: number | null;
+  lossCount: number | null;
 }
 
 interface FreeGameParticipantsResponse {
@@ -235,6 +252,8 @@ interface FreeGameMatchResponse {
   teamBIds: Array<string | null>;
   matchStatus: MatchStatus;
   matchResult: Exclude<MatchResult, null> | "NULL";
+  teamAScore?: number | null;
+  teamBScore?: number | null;
   isActive: boolean;
 }
 
@@ -289,6 +308,8 @@ function mapRounds(rounds: FreeGameRoundResponse[]): GameRound[] {
             match.matchResult && match.matchResult !== "NULL"
               ? match.matchResult
               : null,
+          teamAScore: match.teamAScore ?? null,
+          teamBScore: match.teamBScore ?? null,
           isActive: match.isActive,
         })),
     }));
@@ -439,6 +460,26 @@ export async function updateGame(
   }
 }
 
+export async function addFreeGameParticipant(
+  gameId: string,
+  request: AddGameParticipantRequest
+): Promise<boolean> {
+  try {
+    await apiRequest(`/free-games/${gameId}/participants`, {
+      method: "POST",
+      auth: true,
+      body: {
+        ...request,
+        grade: toBackendGrade(request.grade),
+      },
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function updateGameSchedule(
   gameId: string,
   rounds: ScheduleDraftRound[]
@@ -470,6 +511,64 @@ export async function updateGameSchedule(
   }
 }
 
+export async function startFreeGame(gameId: string): Promise<boolean> {
+  try {
+    await apiRequest(`/free-games/${gameId}/start`, {
+      method: "POST",
+      auth: true,
+      parseAs: "void",
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function startFreeGameMatch(
+  gameId: string,
+  roundNumber: number,
+  courtNumber: number
+): Promise<boolean> {
+  try {
+    await apiRequest(
+      `/free-games/${gameId}/rounds/${roundNumber}/matches/${courtNumber}/start`,
+      {
+        method: "POST",
+        auth: true,
+        parseAs: "void",
+      }
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function completeFreeGameMatch(
+  gameId: string,
+  roundNumber: number,
+  courtNumber: number,
+  request: CompleteGameMatchRequest
+): Promise<boolean> {
+  try {
+    await apiRequest(
+      `/free-games/${gameId}/rounds/${roundNumber}/matches/${courtNumber}/complete`,
+      {
+        method: "POST",
+        auth: true,
+        parseAs: "void",
+        body: request,
+      }
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function getGameStatusLabel(status: GameStatus): string {
   switch (status) {
     case "NOT_STARTED":
@@ -484,7 +583,16 @@ export function getGameStatusLabel(status: GameStatus): string {
 }
 
 export function getMatchRecordModeLabel(mode: MatchRecordMode) {
-  return mode === "RESULT" ? "결과 기록" : "상태만 기록";
+  switch (mode) {
+    case "STATUS_ONLY":
+      return "진행만";
+    case "WINNER_ONLY":
+      return "승자 기록";
+    case "SCORE":
+      return "점수 기록";
+    default:
+      return "-";
+  }
 }
 
 export function getGradeTypeLabel(gradeType: GradeType) {
