@@ -1884,9 +1884,9 @@ export default function CreateFreeGamePage() {
             }
           : null;
   const isCompletionStep = step === 4;
-  const isContentDrivenStep = step === 1 || step === 2;
+  const isContentDrivenStep = step === 1;
   const pageContainerClassName =
-    "container mx-auto flex h-full min-h-0 max-w-5xl flex-1 flex-col overflow-hidden px-4 pt-4 pb-2 md:px-8 md:pt-6 md:pb-4 lg:pt-7 lg:pb-5";
+    "fixed inset-x-0 top-16 bottom-0 z-0 mx-auto flex min-h-0 max-w-5xl flex-col overflow-hidden px-4 pt-4 pb-2 md:px-8 md:pt-6 md:pb-4 lg:pt-7 lg:pb-5";
   const cardClassName =
     `relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] ${
       isCompletionStep ? "flex-none" : isContentDrivenStep ? "md:flex-none" : ""
@@ -2157,14 +2157,8 @@ export default function CreateFreeGamePage() {
                 transition={{ duration: 0.3 }}
                 className="flex min-h-0 flex-1 flex-col md:min-h-fit md:flex-none"
               >
-                <div
-                  ref={participantScrollBodyRef}
-                  className="wizard-scroll create-step-shell min-h-0 flex-1 pr-0.5 md:min-h-fit md:flex-none md:overflow-visible md:pr-0"
-                  tabIndex={0}
-                  role="region"
-                  aria-label="참가자 구성 본문"
-                >
-                  <div className="space-y-4">
+                <div className="create-step-shell min-h-0 flex-1 overflow-hidden pr-0.5 md:min-h-fit md:flex-none md:overflow-visible md:pr-0">
+                  <div className="flex h-full min-h-0 flex-col gap-4 md:h-auto">
                     <div className="md:hidden">
                       <div className="grid grid-cols-[minmax(0,1fr)_44px_52px_44px_44px] gap-1">
                         <input
@@ -2385,30 +2379,6 @@ export default function CreateFreeGamePage() {
                             }))
                           }
                         />
-                        <Select
-                          variant="brutalist"
-                          value={newParticipant.ageGroup}
-                          options={AGE_GROUP_SELECT_OPTIONS}
-                          disabled={isAssignmentEditingLocked}
-                          onChange={(event) =>
-                            setNewParticipant((prev) => ({
-                              ...prev,
-                              ageGroup: event,
-                            }))
-                          }
-                        />
-                        <Select
-                          variant="brutalist"
-                          value={newParticipant.level}
-                          options={LEVEL_SELECT_OPTIONS}
-                          disabled={isAssignmentEditingLocked}
-                          onChange={(event) =>
-                            setNewParticipant((prev) => ({
-                              ...prev,
-                              level: event as Grade,
-                            }))
-                          }
-                        />
                       </div>
                       <div className="w-[104px] shrink-0">
                         <Select
@@ -2448,7 +2418,7 @@ export default function CreateFreeGamePage() {
                     </div>
 
                     <div
-                      className={`border-2 bg-white ${
+                      className={`flex min-h-0 flex-1 flex-col overflow-hidden border-2 bg-white md:flex-none md:overflow-visible ${
                         submitErrorField === "participants"
                           ? "border-red-300"
                           : "border-slate-200"
@@ -2481,7 +2451,13 @@ export default function CreateFreeGamePage() {
                         </div>
                       ) : null}
 
-                      <div className="md:hidden">
+                      <div
+                        ref={participantScrollBodyRef}
+                        className="wizard-scroll min-h-0 flex-1 md:hidden"
+                        tabIndex={0}
+                        role="region"
+                        aria-label="참가자 목록"
+                      >
                         {participants.map((participant, index) => {
                           const partner = partnerLinks[participant.participantId]
                             ? participantById.get(partnerLinks[participant.participantId]) ?? null
@@ -3014,12 +2990,6 @@ export default function CreateFreeGamePage() {
                 <h2 className="mb-3 font-display text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
                   자유게임 생성 완료
                 </h2>
-                <p className="mx-auto mb-8 max-w-sm text-sm font-medium leading-relaxed text-slate-500">
-                  <strong className="text-slate-900">
-                    {gameName || "자유게임"}
-                  </strong>{" "}
-                  생성이 끝났어요. 운영 화면으로 이동하거나 링크를 복사하세요.
-                </p>
 
                 <div className="flex w-full max-w-md flex-col gap-3 sm:flex-row">
                   <Link
@@ -3027,7 +2997,7 @@ export default function CreateFreeGamePage() {
                     className="flex-1"
                   >
                     <Button className="h-12 w-full rounded-none bg-slate-900 text-sm font-bold text-white shadow-[4px_4px_0px_0px_rgba(16,185,129,1)] transition-transform hover:bg-slate-800 active:translate-y-1 active:translate-x-1 active:shadow-none">
-                      운영 화면 보기
+                      자유게임 시작하러 가기
                       <ChevronRight className="ml-2 h-4 w-4" />
                     </Button>
                   </Link>
