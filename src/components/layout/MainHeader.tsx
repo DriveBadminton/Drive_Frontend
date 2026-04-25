@@ -37,7 +37,7 @@ export default function MainHeader() {
     <header className="sticky top-0 z-50 w-full overflow-hidden border-b border-slate-800 bg-slate-950 text-white">
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff0a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0a_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
 
-      <div className="container relative mx-auto flex h-16 items-center justify-between px-4 md:px-6">
+      <div className="relative mx-auto flex h-16 w-full max-w-[112rem] items-center justify-between px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
         <div className="flex items-center gap-6 md:gap-10">
           <Link href="/" className="flex items-center transition-opacity hover:opacity-80">
             <Logo variant="dark" className="h-7" />
@@ -130,8 +130,13 @@ export default function MainHeader() {
               </>
             )}
           </div>
-          <Button variant="ghost" size="icon" className="rounded-none text-zinc-300 hover:bg-zinc-800 hover:text-white md:hidden">
-            <Menu className="h-6 w-6" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11 rounded-none text-zinc-300 hover:bg-zinc-800 hover:text-white md:hidden"
+            aria-label="메뉴 열기"
+          >
+            <Menu className="h-5 w-5" />
           </Button>
         </div>
       </div>
