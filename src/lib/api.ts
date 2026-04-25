@@ -1,5 +1,7 @@
 "use client";
 
+import { SCHEDULED_AT_VALIDATION_MESSAGE } from "./scheduled-at";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.rallyon.test";
 const AUTH_URL = process.env.NEXT_PUBLIC_AUTH_URL || "https://auth.rallyon.test";
 export const AUTH_EXPIRED_EVENT = "rallyon:auth-expired";
@@ -24,9 +26,32 @@ export class ApiError extends Error {
   }
 }
 
+function getMappedProblemMessage(
+  problem: ProblemDetail | undefined,
+  status: number
+): string | null {
+  if (!problem || ![400, 422].includes(status)) {
+    return null;
+  }
+
+  const serializedProblem = `${problem.type ?? ""} ${problem.title ?? ""} ${problem.detail ?? ""}`
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+  if (serializedProblem.includes("scheduledat")) {
+    return SCHEDULED_AT_VALIDATION_MESSAGE;
+  }
+
+  return null;
+}
+
 export function getUserFacingErrorMessage(error: unknown, fallback: string) {
   if (error instanceof ApiError) {
-    return error.message;
+    return (
+      getMappedProblemMessage(error.problem, error.status) ||
+      fallback ||
+      getDefaultErrorMessage(error.status)
+    );
   }
 
   return fallback;
@@ -108,7 +133,7 @@ async function parseProblemDetail(response: Response) {
 async function toApiError(response: Response, fallback?: string) {
   const problem = await parseProblemDetail(response);
   const message =
-    problem?.detail ||
+    getMappedProblemMessage(problem, response.status) ||
     problem?.title ||
     fallback ||
     getDefaultErrorMessage(response.status);

@@ -38,6 +38,11 @@ import { validateParticipantName } from "@/lib/participant";
 import { searchPlaces, type PlaceSearchResult } from "@/lib/place";
 import { pushRecentGameId } from "@/lib/recent-games";
 import {
+  isScheduledAtSelectable,
+  sanitizeScheduledAtDraft,
+  SCHEDULED_AT_VALIDATION_MESSAGE,
+} from "@/lib/scheduled-at";
+import {
   applyAssignmentPreviewToRounds,
   AssignmentPreviewContractError,
   buildAssignmentPreviewRequest,
@@ -439,7 +444,7 @@ function parseSavedDraftState(value: unknown): SavedDraftState | null {
     version: SESSION_STORAGE_VERSION,
     step,
     gameName,
-    date,
+    date: sanitizeScheduledAtDraft(date),
     location,
     courts: hydratedCourts,
     roundCount: hydratedRoundCount,
@@ -447,15 +452,6 @@ function parseSavedDraftState(value: unknown): SavedDraftState | null {
     participants: hydratedParticipants,
     partnerLinks,
   };
-}
-
-function isFutureDateTime(value: string) {
-  if (!value) {
-    return false;
-  }
-
-  const candidate = new Date(value);
-  return !Number.isNaN(candidate.getTime()) && candidate.getTime() > Date.now();
 }
 
 function getGenderLabel(gender: "M" | "F") {
@@ -1471,6 +1467,13 @@ export default function CreateFreeGamePage() {
       return;
     }
 
+    if (step >= 2 && scheduledAtValidationResult) {
+      setSubmitError(scheduledAtValidationResult.message);
+      setSubmitErrorField(scheduledAtValidationResult.field);
+      setStep(1);
+      return;
+    }
+
     if (step === 1) {
       setRounds(createInitialRounds(courts, roundCount));
       setStep(2);
@@ -1557,6 +1560,17 @@ export default function CreateFreeGamePage() {
 
   const trimmedGameName = gameName.trim();
   const trimmedLocation = location.trim();
+  const scheduledAtValidationResult = !date
+    ? {
+        field: "date" as StepValidationField,
+        message: "날짜와 시간을 선택해주세요.",
+      }
+    : !isScheduledAtSelectable(date)
+      ? {
+          field: "date" as StepValidationField,
+          message: SCHEDULED_AT_VALIDATION_MESSAGE,
+        }
+      : null;
 
   const getStepValidationResult = (
     targetStep: number
@@ -1566,15 +1580,8 @@ export default function CreateFreeGamePage() {
         return { field: "gameName", message: "세션 이름을 입력해주세요." };
       }
 
-      if (!date) {
-        return { field: "date", message: "날짜와 시간을 선택해주세요." };
-      }
-
-      if (!isFutureDateTime(date)) {
-        return {
-          field: "date",
-          message: "현재 시각보다 미래의 시간만 선택할 수 있습니다.",
-        };
+      if (scheduledAtValidationResult) {
+        return scheduledAtValidationResult;
       }
 
       if (!trimmedLocation) {
@@ -2155,9 +2162,14 @@ export default function CreateFreeGamePage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
-                className="flex min-h-0 flex-1 flex-col md:min-h-fit md:flex-none"
+                className="flex min-h-0 flex-1 flex-col"
               >
-                <div className="create-step-shell min-h-0 flex-1 overflow-hidden pr-0.5 md:min-h-fit md:flex-none md:overflow-visible md:pr-0">
+                <div
+                  className="wizard-scroll create-step-shell min-h-0 flex-1 pr-0.5 md:pr-0"
+                  tabIndex={0}
+                  role="region"
+                  aria-label="참가자 구성 본문"
+                >
                   <div className="flex h-full min-h-0 flex-col gap-4 md:h-auto">
                     <div className="md:hidden">
                       <div className="grid grid-cols-[minmax(0,1fr)_44px_52px_44px_44px] gap-1">
