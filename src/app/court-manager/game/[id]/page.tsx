@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams } from "next/navigation";
 import {
   Activity,
@@ -228,6 +228,34 @@ function formatTeamLine(
   return participantIds
     .map((participantId) => formatParticipantName(participantId, participantsById))
     .join(" / ");
+}
+
+function formatMatchCountLabel(count: number) {
+  return `${count}경기`;
+}
+
+function getGenderLabel(gender: Gender) {
+  return gender === "MALE" ? "남" : "여";
+}
+
+function formatParticipantProfileLabel(
+  participant: Pick<Participant, "gender" | "ageGroup" | "grade">,
+  options: { includeGrade?: boolean } = {}
+) {
+  return [
+    `${getGenderLabel(participant.gender)} · ${participant.ageGroup}대`,
+    options.includeGrade ? formatGradeLabel(participant.grade) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function shouldShowWinLoss(matchRecordMode: MatchRecordMode) {
+  return matchRecordMode !== "STATUS_ONLY";
+}
+
+function formatWinLossLabel(participant: Pick<Participant, "winCount" | "lossCount">) {
+  return `${participant.winCount ?? 0}승 ${participant.lossCount ?? 0}패`;
 }
 
 function cloneSchedule(rounds: GameRound[]): ScheduleDraftRound[] {
@@ -553,6 +581,7 @@ function applyGameDetailAssignmentPreview({
 const BadmintonCourt = ({
   court,
   status,
+  density = "default",
   isEditable = false,
   isInteractionDisabled = false,
   selectedTargetSlot = null,
@@ -563,6 +592,7 @@ const BadmintonCourt = ({
     participants: (Participant | undefined)[];
   };
   status: VisualRoundStatus;
+  density?: "default" | "compact";
   isEditable?: boolean;
   isInteractionDisabled?: boolean;
   selectedTargetSlot?: number | null;
@@ -570,65 +600,94 @@ const BadmintonCourt = ({
 }) => {
   const isCompleted = status === "completed";
   const isActive = status === "active";
+  const isCompact = density === "compact";
   const resultLabel =
     court.match.teamAScore != null && court.match.teamBScore != null
       ? `${court.match.teamAScore}:${court.match.teamBScore}`
       : toResultLabel(court.match.result ?? null);
   const slotParticipantIds = getMatchSlotIds(court.match);
+  const courtFrameClassName = isCompact
+    ? "border-2 p-1 shadow-none"
+    : "border-4 p-2 shadow-inner";
+  const courtInsetClassName = isCompact ? "inset-1 border" : "inset-2 border-2";
+  const netClassName = isCompact
+    ? "top-1 bottom-1 w-0.5"
+    : "top-1 bottom-1 w-1";
+  const horizontalLineClassName = isCompact
+    ? "left-1 right-1 h-px"
+    : "left-2 right-2 h-0.5";
+  const sideLineClassName = isCompact
+    ? "top-1 bottom-1 w-px"
+    : "top-2 bottom-2 w-0.5";
+  const slotPaddingClassName = isCompact ? "p-0.5" : "p-1";
+  const playerChipBaseClassName = isCompact
+    ? "flex min-w-0 max-w-[96%] items-center justify-center overflow-hidden rounded-none border px-1 py-0.5"
+    : "flex min-w-[70px] max-w-[95%] items-center justify-center rounded-none border-2 px-2 py-1";
+  const playerNameClassName = isCompact
+    ? "flex w-full min-w-0 flex-col items-center justify-center truncate text-center text-[9px] leading-none font-black sm:text-[10px] xl:text-[11px]"
+    : "w-full truncate text-center text-[10px] leading-none font-bold";
+  const playerMetaClassName = isCompact
+    ? "mt-0.5 max-w-full truncate font-mono text-[7px] font-bold uppercase tracking-wider text-slate-500 sm:text-[8px]"
+    : "ml-0.5 text-[9px] font-mono uppercase tracking-widest";
+  const emptyEditableSlotClassName = isCompact
+    ? "flex min-h-5 min-w-0 max-w-[88%] items-center justify-center rounded-none border px-1 py-0.5 text-[8px] font-black uppercase tracking-[0.12em]"
+    : "flex min-h-8 min-w-[56px] max-w-[78px] items-center justify-center rounded-none border-2 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em]";
+  const emptyReadOnlySlotClassName =
+    "flex min-w-0 max-w-[88%] items-center justify-center rounded-none border border-white/35 bg-white/15 px-1 py-0.5 text-center text-[8px] font-black leading-none text-white/80";
 
   return (
     <div
-      className={`relative flex aspect-[2/1] flex-col justify-between overflow-hidden rounded-none border-4 p-2 shadow-inner ${
+      className={`relative flex aspect-[2/1] w-full min-w-0 flex-col justify-between overflow-hidden rounded-none ${courtFrameClassName} ${
         isCompleted
           ? "border-zinc-900 bg-zinc-800 opacity-90"
           : isActive
           ? "border-slate-900 bg-emerald-700"
-          : "border-zinc-300 bg-zinc-200"
+          : "border-slate-900 bg-emerald-700/80"
       }`}
     >
       <div
-        className={`pointer-events-none absolute inset-2 border-2 ${
+        className={`pointer-events-none absolute ${courtInsetClassName} ${
           isCompleted
             ? "border-zinc-600"
             : isActive
             ? "border-white/30"
-            : "border-zinc-400/30"
+            : "border-white/25"
         }`}
       />
       <div
-        className={`pointer-events-none absolute top-1 bottom-1 left-1/2 w-1 -translate-x-1/2 ${
+        className={`pointer-events-none absolute left-1/2 -translate-x-1/2 ${netClassName} ${
           isCompleted
             ? "bg-zinc-600"
             : isActive
             ? "bg-white/50"
-            : "bg-zinc-400/50"
+            : "bg-white/40"
         }`}
       />
       <div
-        className={`pointer-events-none absolute top-1/2 left-2 right-2 h-0.5 -translate-y-1/2 ${
+        className={`pointer-events-none absolute top-1/2 -translate-y-1/2 ${horizontalLineClassName} ${
           isCompleted
             ? "bg-zinc-600"
             : isActive
             ? "bg-white/30"
-            : "bg-zinc-400/30"
+            : "bg-white/25"
         }`}
       />
       <div
-        className={`pointer-events-none absolute top-2 bottom-2 left-[35%] w-0.5 ${
+        className={`pointer-events-none absolute left-[35%] ${sideLineClassName} ${
           isCompleted
             ? "bg-zinc-600"
             : isActive
             ? "bg-white/30"
-            : "bg-zinc-400/30"
+            : "bg-white/25"
         }`}
       />
       <div
-        className={`pointer-events-none absolute top-2 bottom-2 right-[35%] w-0.5 ${
+        className={`pointer-events-none absolute right-[35%] ${sideLineClassName} ${
           isCompleted
             ? "bg-zinc-600"
             : isActive
             ? "bg-white/30"
-            : "bg-zinc-400/30"
+            : "bg-white/25"
         }`}
       />
 
@@ -642,7 +701,7 @@ const BadmintonCourt = ({
         {court.participants.map((participant, index) => (
           <div
             key={`${court.match.roundNumber}-${court.match.courtNumber}-${index}`}
-            className="flex items-center justify-center p-1"
+            className={`flex min-w-0 items-center justify-center ${slotPaddingClassName}`}
           >
             {isEditable ? (
               <button
@@ -655,32 +714,31 @@ const BadmintonCourt = ({
               >
                 {participant ? (
                   <div
-                    className={`flex min-w-[70px] max-w-[95%] items-center justify-center rounded-none border-2 px-2 py-1 ${
+                    className={`${playerChipBaseClassName} ${
                       selectedTargetSlot === index
                         ? "border-teal-500 bg-teal-100 text-teal-950 ring-2 ring-teal-300/60"
                         : isCompleted
                         ? "border-zinc-900 bg-zinc-700 text-zinc-400"
                         : isActive
                         ? "border-slate-900 bg-white text-slate-900 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)]"
-                        : "border-zinc-400 bg-white text-zinc-600 shadow-[2px_2px_0px_0px_rgba(161,161,170,1)]"
+                        : "border-slate-900 bg-white text-slate-900 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)]"
                     }`}
                   >
-                    <div className="w-full truncate text-center text-[10px] leading-none font-bold">
+                    <div className={playerNameClassName}>
                       {participant.name}
                       <span
-                        className={`ml-0.5 text-[9px] font-mono uppercase tracking-widest ${
+                        className={`${playerMetaClassName} ${
                           isCompleted ? "text-zinc-500" : "text-slate-500"
                         }`}
                       >
-                        {" "}
-                        · {participant.gender === "MALE" ? "M" : "F"}/
-                        {participant.ageGroup}
+                        {isCompact ? "" : " · "}
+                        {formatParticipantProfileLabel(participant)}
                       </span>
                     </div>
                   </div>
                 ) : (
                   <div
-                    className={`flex min-h-8 min-w-[56px] max-w-[78px] items-center justify-center rounded-none border-2 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em] ${
+                    className={`${emptyEditableSlotClassName} ${
                       selectedTargetSlot === index
                         ? "border-teal-500 bg-teal-100 text-teal-900 ring-2 ring-teal-300/60"
                         : isInteractionDisabled
@@ -694,27 +752,28 @@ const BadmintonCourt = ({
               </button>
             ) : participant ? (
               <div
-                className={`flex min-w-[70px] max-w-[95%] items-center justify-center rounded-none border-2 px-2 py-1 ${
+                className={`${playerChipBaseClassName} ${
                   isCompleted
                     ? "border-zinc-900 bg-zinc-700 text-zinc-400"
                     : isActive
                     ? "border-slate-900 bg-white text-slate-900 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)]"
-                    : "border-zinc-400 bg-white text-zinc-600 shadow-[2px_2px_0px_0px_rgba(161,161,170,1)]"
+                    : "border-slate-900 bg-white text-slate-900 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)]"
                 }`}
               >
-                <div className="w-full truncate text-center text-[10px] leading-none font-bold">
+                <div className={playerNameClassName}>
                   {participant.name}
                   <span
-                    className={`ml-0.5 text-[9px] font-mono uppercase tracking-widest ${
+                    className={`${playerMetaClassName} ${
                       isCompleted ? "text-zinc-500" : "text-slate-500"
                     }`}
                   >
-                    {" "}
-                    · {participant.gender === "MALE" ? "M" : "F"}/
-                    {participant.ageGroup}
+                    {isCompact ? "" : " · "}
+                    {formatParticipantProfileLabel(participant)}
                   </span>
                 </div>
               </div>
+            ) : isCompact ? (
+              <div className={emptyReadOnlySlotClassName}>빈 슬롯</div>
             ) : (
               <div
                 className={`h-1.5 w-1.5 rounded-none ${
@@ -724,7 +783,7 @@ const BadmintonCourt = ({
                     ? "bg-zinc-700"
                     : isActive
                     ? "bg-white/30"
-                    : "bg-zinc-400/30"
+                    : "bg-white/25"
                 }`}
               />
             )}
@@ -732,6 +791,156 @@ const BadmintonCourt = ({
         ))}
       </div>
     </div>
+  );
+};
+
+const OperationCourtTile = ({
+  match,
+  participantsById,
+  tone = "pending",
+  children,
+}: {
+  match: CourtMatch;
+  participantsById: Map<string, Participant>;
+  tone?: "pending" | "active";
+  children?: ReactNode;
+}) => {
+  const isActive = tone === "active";
+  const toneBadgeClassName = isActive
+    ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-700"
+    : "border-zinc-300 bg-zinc-100 text-zinc-500";
+  const accentClassName = isActive ? "text-emerald-700" : "text-zinc-900";
+  const dividerClassName = isActive ? "border-emerald-500/20" : "border-zinc-200";
+  const operationCourt = {
+    match,
+    participants: getMatchSlotIds(match).map((participantId) =>
+      participantId ? participantsById.get(participantId) : undefined
+    ),
+  };
+
+  return (
+    <article
+      className={`flex w-full min-w-0 flex-col overflow-hidden border-2 bg-white p-2 ${
+        isActive
+          ? "border-emerald-500/50 shadow-[0_0_0_1px_rgba(16,185,129,0.08)]"
+          : "border-zinc-200"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] font-mono font-bold uppercase tracking-widest ${accentClassName}`}>
+              코트 {String(match.courtNumber).padStart(2, "0")}
+            </span>
+            <span
+              className={`inline-flex items-center border px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest ${toneBadgeClassName}`}
+            >
+              {isActive ? "진행 중" : "대기"}
+            </span>
+          </div>
+        </div>
+        <span className="shrink-0 text-[10px] font-bold text-zinc-400">
+          R{String(match.roundNumber).padStart(2, "0")}
+        </span>
+      </div>
+
+      <div className={`mt-2 min-w-0 border-t pt-2 ${dividerClassName}`}>
+        <BadmintonCourt
+          court={operationCourt}
+          status={isActive ? "active" : "upcoming"}
+          density="compact"
+        />
+      </div>
+
+      {children ? <div className={`mt-2 border-t pt-2 ${dividerClassName}`}>{children}</div> : null}
+    </article>
+  );
+};
+
+const CompactScheduleRound = ({
+  round,
+  participantById,
+}: {
+  round: DisplayRoundGroup;
+  participantById: Map<string, Participant>;
+}) => {
+  return (
+    <section className="border-t border-zinc-200 pt-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div
+          className={`border px-3 py-1 text-[10px] font-mono font-bold uppercase tracking-widest ${
+            round.visualStatus === "active"
+              ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+              : round.visualStatus === "completed"
+              ? "border-zinc-300 bg-zinc-100 text-zinc-500"
+              : "border-zinc-200 bg-white text-zinc-400"
+          }`}
+        >
+          Round {String(round.roundNumber).padStart(2, "0")}
+          {round.visualStatus === "active" ? (
+            <span className="ml-2 animate-pulse text-emerald-500">●</span>
+          ) : null}
+        </div>
+        <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
+          {round.courts.length}코트
+        </span>
+      </div>
+
+      <div className="divide-y divide-zinc-100 border border-zinc-200 bg-white">
+        {round.courts.map((court, courtIndex) => {
+          const matchStatus = toVisualMatchStatus(court.match);
+          const matchStatusLabel =
+            matchStatus === "active"
+              ? "진행 중"
+              : matchStatus === "completed"
+              ? "완료"
+              : "대기";
+
+          return (
+            <div
+              key={`${round.roundNumber}-${court.match.courtNumber}`}
+              className="grid gap-1.5 px-3 py-2.5 sm:grid-cols-[5.5rem_1fr] sm:items-center"
+            >
+              <div className="flex items-center justify-between gap-2 sm:block">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                  코트 {String(courtIndex + 1).padStart(2, "0")}
+                </span>
+                <span
+                  className={`text-[10px] font-bold sm:mt-1 sm:block ${
+                    matchStatus === "active"
+                      ? "text-emerald-600"
+                      : matchStatus === "completed"
+                      ? "text-zinc-400"
+                      : "text-zinc-300"
+                  }`}
+                >
+                  {matchStatusLabel}
+                </span>
+              </div>
+
+              <div className="grid min-w-0 gap-1.5 text-xs font-bold text-zinc-800 sm:grid-cols-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 font-mono font-black text-emerald-600">
+                    A
+                  </span>
+                  <span className="truncate">
+                    {formatTeamLine(court.match.teamAIds, participantById)}
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 font-mono font-black text-emerald-600">
+                    B
+                  </span>
+                  <span className="truncate">
+                    {formatTeamLine(court.match.teamBIds, participantById)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 };
 
@@ -891,6 +1100,23 @@ export default function ManagerGameDetailPage() {
   const isBusy = operationSubmitting || isAiPreviewSubmitting || isParticipantSubmitting;
   const isScheduleInteractionDisabled = isBusy || !isEditingSchedule;
   const canAddParticipant = game?.status !== "COMPLETED";
+  const isAnyModalOpen =
+    isEditingSettings ||
+    isParticipantManagerOpen ||
+    Boolean(selectedScheduleTarget && isEditingSchedule);
+
+  useEffect(() => {
+    if (!isAnyModalOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isAnyModalOpen]);
 
   const handleCopyShareLink = async () => {
     if (!game) {
@@ -1046,6 +1272,10 @@ export default function ManagerGameDetailPage() {
     setSettingsError("");
     const success = await updateGame(game.id, {
       title: trimmedTitle,
+      matchRecordMode: isRecordModeLocked
+        ? game.matchRecordMode
+        : settingsDraft.matchRecordMode,
+      gradeType: settingsDraft.gradeType,
     });
     if (!success) {
       setSettingsError("게임 이름 저장에 실패했습니다.");
@@ -1076,46 +1306,6 @@ export default function ManagerGameDetailPage() {
     } else {
       setEditMode(null);
       setSelectedScheduleTarget(null);
-      await reloadGame();
-    }
-    setOperationSubmitting(false);
-  };
-
-  const handleChangeMatchRecordMode = async (matchRecordMode: MatchRecordMode) => {
-    if (!game || game.status !== "NOT_STARTED" || matchRecordMode === game.matchRecordMode) {
-      return;
-    }
-
-    setOperationSubmitting(true);
-    setSettingsError("");
-    const success = await updateGame(game.id, {
-      title: game.title,
-      gradeType: game.gradeType,
-      matchRecordMode,
-    });
-    if (!success) {
-      setSettingsError("기록 방식 변경에 실패했습니다.");
-    } else {
-      await reloadGame();
-    }
-    setOperationSubmitting(false);
-  };
-
-  const handleChangeGradeType = async (gradeType: Game["gradeType"]) => {
-    if (!game || gradeType === game.gradeType) {
-      return;
-    }
-
-    setOperationSubmitting(true);
-    setSettingsError("");
-    const success = await updateGame(game.id, {
-      title: game.title,
-      matchRecordMode: game.matchRecordMode,
-      gradeType,
-    });
-    if (!success) {
-      setSettingsError("급수 기준 변경에 실패했습니다.");
-    } else {
       await reloadGame();
     }
     setOperationSubmitting(false);
@@ -1326,254 +1516,301 @@ export default function ManagerGameDetailPage() {
   const selectedTargetParticipant = selectedTargetParticipantId
     ? participantById.get(selectedTargetParticipantId) ?? null
     : null;
+  const mobileParticipantViews = participantViews.slice(0, 8);
+  const hiddenMobileParticipantCount = Math.max(
+    participantViews.length - mobileParticipantViews.length,
+    0
+  );
   const isRecordModeLocked = game?.status !== "NOT_STARTED";
   const recordModeOptions: MatchRecordMode[] = [
     "STATUS_ONLY",
     "WINNER_ONLY",
     "SCORE",
   ];
-  const recordModeSelectOptions = recordModeOptions.map((mode) => ({
-    value: mode,
-    label: getMatchRecordModeLabel(mode),
-  }));
   const assignmentPolicySelectOptions = Object.entries(
     AI_ASSIGNMENT_POLICY_LABELS
   ).map(([value, label]) => ({ value, label }));
-  const operationPanel = game ? (
-    <div className="border-2 border-zinc-950 bg-zinc-950 p-5 text-white">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
-            현재 운영
-          </h3>
-          <p className="mt-2 font-display text-xl font-black tracking-tight text-white">
-            {game.status === "NOT_STARTED"
-              ? "대기 게임"
-              : game.status === "COMPLETED"
-              ? "자유게임 완료"
-              : activeMatches.length > 0
-              ? "진행 중 매치 종료"
-              : "입장 대상 확인"}
-          </p>
-        </div>
-        <span className="shrink-0 rounded-none border border-emerald-500/30 bg-emerald-500/15 px-2 py-1 text-[10px] font-mono font-bold text-emerald-300">
-          {operationalRoundNumber
-            ? `R${String(operationalRoundNumber).padStart(2, "0")}`
-            : "DONE"}
-        </span>
-      </div>
+  const operationBoardTitle = game
+    ? game.status === "NOT_STARTED"
+      ? "대기 게임"
+      : game.status === "COMPLETED"
+      ? "자유게임 완료"
+      : activeMatches.length > 0
+      ? "진행 중"
+      : "입장 대상 확인"
+    : "";
+  const operationBoardSummary = game
+    ? game.status === "COMPLETED"
+      ? "모든 매치가 종료되었습니다."
+      : activeMatches.length > 0
+      ? `진행 중 ${activeMatches.length}코트${
+          pendingMatches.length > 0 ? ` · 다음 입장 ${pendingMatches.length}코트` : ""
+        }`
+      : pendingMatches.length > 0
+      ? `${pendingMatches.length}코트 입장 대기`
+      : "입장 대상이 없습니다."
+    : "";
+  const showParticipantWinLoss = game
+    ? shouldShowWinLoss(game.matchRecordMode)
+    : false;
+  const renderParticipantSummaryRow = (
+    participant: ParticipantView,
+    options: { includeGrade?: boolean; modal?: boolean } = {}
+  ) => {
+    const isPlaying = participant.status === "playing";
 
-      {operationError ? (
-        <div className="mb-4 border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200">
-          {operationError}
-        </div>
-      ) : null}
-
-      {game.status === "NOT_STARTED" ? (
-        <div className="space-y-4">
-          {pendingMatches.length > 0 ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
-                <span>입장 큐</span>
-                <span>{pendingMatches.length}코트</span>
-              </div>
-              {pendingMatches.map((match) => (
-                <div
-                  key={getMatchKey(match.roundNumber, match.courtNumber)}
-                  className="border border-zinc-800 bg-zinc-900/70 px-3 py-2.5"
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-300">
-                      코트 {String(match.courtNumber).padStart(2, "0")}
-                    </span>
-                    <span className="text-[10px] font-bold text-zinc-500">
-                      R{String(match.roundNumber).padStart(2, "0")}
-                    </span>
-                  </div>
-                  <div className="space-y-1 text-xs font-bold text-zinc-200">
-                    <div>
-                      <span className="mr-2 text-emerald-300">A</span>
-                      {formatTeamLine(match.teamAIds, participantById)}
-                    </div>
-                    <div>
-                      <span className="mr-2 text-emerald-300">B</span>
-                      {formatTeamLine(match.teamBIds, participantById)}
-                    </div>
-                  </div>
-                </div>
-              ))}
+    return (
+      <div
+        key={participant.id}
+        className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 transition-colors hover:bg-zinc-50 ${
+          options.modal ? "px-4 py-3" : "px-4 py-3"
+        }`}
+      >
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {isPlaying ? (
+              <span className="h-2 w-2 shrink-0 rounded-none bg-emerald-500" />
+            ) : null}
+            <div className="truncate text-sm font-bold text-zinc-950">
+              {participant.name}
             </div>
-          ) : (
-            <div className="border border-zinc-800 bg-zinc-900/70 px-3 py-4 text-sm font-bold text-zinc-200">
-              입장 대상이 없습니다. 대진표를 편집해 참가자를 배정해주세요.
-            </div>
-          )}
-          <Button
-            className="h-12 w-full rounded-none bg-emerald-500 text-xs font-black tracking-widest text-zinc-950 hover:bg-emerald-400"
-            onClick={() => void handleStartGame()}
-            disabled={isBusy || pendingMatches.length === 0}
+          </div>
+          <div
+            className={`mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[10px] font-mono uppercase tracking-widest text-zinc-500 ${
+              isPlaying ? "pl-[18px]" : ""
+            }`}
           >
-            자유게임 시작
+            <span>{formatParticipantProfileLabel(participant, options)}</span>
+            <span>{formatMatchCountLabel(participant.gamesAssigned)}</span>
+          </div>
+        </div>
+
+        {isPlaying || showParticipantWinLoss ? (
+          <div className="shrink-0 text-right">
+            {isPlaying ? (
+              <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-600">
+                경기 중
+              </div>
+            ) : null}
+            {showParticipantWinLoss ? (
+              <div className={isPlaying ? "mt-1 text-[11px] font-bold text-zinc-500" : "text-[11px] font-bold text-zinc-500"}>
+                {formatWinLossLabel(participant)}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+  const renderActiveMatchActions = (match: CourtMatch) => {
+    if (!game) {
+      return null;
+    }
+
+    const matchKey = getMatchKey(match.roundNumber, match.courtNumber);
+    const scoreDraft = scoreDrafts[matchKey] ?? {
+      teamAScore: "",
+      teamBScore: "",
+    };
+
+    if (game.matchRecordMode === "STATUS_ONLY") {
+      return (
+        <Button
+          className="h-10 w-full rounded-none bg-zinc-950 text-xs font-bold text-white hover:bg-zinc-800"
+          onClick={() => void handleCompleteMatch(match.roundNumber, match.courtNumber)}
+          disabled={isBusy}
+        >
+          매치 종료
+        </Button>
+      );
+    }
+
+    if (game.matchRecordMode === "WINNER_ONLY") {
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            variant="outline"
+            className="h-10 rounded-none border-zinc-300 text-[11px] font-bold"
+            onClick={() =>
+              void handleCompleteMatch(match.roundNumber, match.courtNumber, "TEAM_A")
+            }
+            disabled={isBusy}
+          >
+            A팀 승
+          </Button>
+          <Button
+            variant="outline"
+            className="h-10 rounded-none border-zinc-300 text-[11px] font-bold"
+            onClick={() =>
+              void handleCompleteMatch(match.roundNumber, match.courtNumber, "TEAM_B")
+            }
+            disabled={isBusy}
+          >
+            B팀 승
           </Button>
         </div>
-      ) : game.status === "COMPLETED" ? (
-        <div className="border border-zinc-800 bg-zinc-900/70 px-3 py-4 text-sm font-bold text-zinc-200">
-          모든 매치가 종료되었습니다.
-        </div>
-      ) : activeMatches.length > 0 ? (
-        <div className="space-y-3">
-          {activeMatches.map((match) => {
-            const matchKey = getMatchKey(match.roundNumber, match.courtNumber);
-            const scoreDraft = scoreDrafts[matchKey] ?? {
-              teamAScore: "",
-              teamBScore: "",
-            };
+      );
+    }
 
-            return (
-              <div key={matchKey} className="border border-emerald-500/40 bg-emerald-500/10 p-3">
-                <div className="mb-2 text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-200">
-                  코트 {String(match.courtNumber).padStart(2, "0")} 진행 중
-                </div>
-                <div className="text-xs text-zinc-100">
-                  A {formatTeamLine(match.teamAIds, participantById)}
-                </div>
-                <div className="mt-1 text-xs text-zinc-100">
-                  B {formatTeamLine(match.teamBIds, participantById)}
-                </div>
-
-                {game.matchRecordMode === "STATUS_ONLY" ? (
-                  <Button
-                    className="mt-3 h-10 w-full rounded-none bg-white text-xs font-bold text-zinc-950 hover:bg-zinc-200"
-                    onClick={() =>
-                      void handleCompleteMatch(match.roundNumber, match.courtNumber)
-                    }
-                    disabled={isBusy}
-                  >
-                    매치 종료
-                  </Button>
-                ) : game.matchRecordMode === "WINNER_ONLY" ? (
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <Button
-                      className="h-10 rounded-none bg-white text-xs font-bold text-zinc-950 hover:bg-zinc-200"
-                      onClick={() =>
-                        void handleCompleteMatch(
-                          match.roundNumber,
-                          match.courtNumber,
-                          "TEAM_A"
-                        )
-                      }
-                      disabled={isBusy}
-                    >
-                      A팀 승
-                    </Button>
-                    <Button
-                      className="h-10 rounded-none bg-white text-xs font-bold text-zinc-950 hover:bg-zinc-200"
-                      onClick={() =>
-                        void handleCompleteMatch(
-                          match.roundNumber,
-                          match.courtNumber,
-                          "TEAM_B"
-                        )
-                      }
-                      disabled={isBusy}
-                    >
-                      B팀 승
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
-                    <input
-                      inputMode="numeric"
-                      value={scoreDraft.teamAScore}
-                      onChange={(event) =>
-                        updateScoreDraft(
-                          match.roundNumber,
-                          match.courtNumber,
-                          "teamAScore",
-                          event.target.value.replace(/\D/g, "")
-                        )
-                      }
-                      className="h-10 min-w-0 rounded-none border-2 border-zinc-700 bg-zinc-950 px-2 text-center text-sm font-bold text-white focus:border-emerald-400 focus:outline-none"
-                      placeholder="A"
-                    />
-                    <input
-                      inputMode="numeric"
-                      value={scoreDraft.teamBScore}
-                      onChange={(event) =>
-                        updateScoreDraft(
-                          match.roundNumber,
-                          match.courtNumber,
-                          "teamBScore",
-                          event.target.value.replace(/\D/g, "")
-                        )
-                      }
-                      className="h-10 min-w-0 rounded-none border-2 border-zinc-700 bg-zinc-950 px-2 text-center text-sm font-bold text-white focus:border-emerald-400 focus:outline-none"
-                      placeholder="B"
-                    />
-                    <Button
-                      className="h-10 rounded-none bg-white px-3 text-xs font-bold text-zinc-950 hover:bg-zinc-200"
-                      onClick={() =>
-                        void handleCompleteMatch(match.roundNumber, match.courtNumber)
-                      }
-                      disabled={isBusy}
-                    >
-                      종료
-                    </Button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+    return (
+      <div className="grid gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            inputMode="numeric"
+            value={scoreDraft.teamAScore}
+            onChange={(event) =>
+              updateScoreDraft(
+                match.roundNumber,
+                match.courtNumber,
+                "teamAScore",
+                event.target.value.replace(/\D/g, "")
+              )
+            }
+            className="h-10 min-w-0 rounded-none border-2 border-zinc-200 bg-white px-2 text-center text-sm font-bold text-zinc-950 focus:border-zinc-950 focus:outline-none"
+            placeholder="A"
+          />
+          <input
+            inputMode="numeric"
+            value={scoreDraft.teamBScore}
+            onChange={(event) =>
+              updateScoreDraft(
+                match.roundNumber,
+                match.courtNumber,
+                "teamBScore",
+                event.target.value.replace(/\D/g, "")
+              )
+            }
+            className="h-10 min-w-0 rounded-none border-2 border-zinc-200 bg-white px-2 text-center text-sm font-bold text-zinc-950 focus:border-zinc-950 focus:outline-none"
+            placeholder="B"
+          />
         </div>
-      ) : (
-        <div className="space-y-3">
-          {pendingMatches.length > 0 ? (
+        <Button
+          className="h-10 rounded-none bg-zinc-950 px-3 text-xs font-bold text-white hover:bg-zinc-800"
+          onClick={() => void handleCompleteMatch(match.roundNumber, match.courtNumber)}
+          disabled={isBusy}
+        >
+          종료
+        </Button>
+      </div>
+    );
+  };
+  const operationBoard = game ? (
+    <section className="w-full min-w-0 overflow-hidden border-2 border-zinc-950 bg-white">
+      <div className="border-b-2 border-zinc-950 bg-zinc-950 px-4 py-4 text-white">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
+              현재 운영
+            </div>
+            <h2 className="mt-1 font-display text-xl font-black tracking-tight text-white">
+              {operationBoardTitle}
+            </h2>
+          </div>
+          <span className="shrink-0 rounded-none border border-emerald-500/30 bg-emerald-500/15 px-2 py-1 text-[10px] font-mono font-bold text-emerald-300">
+            {operationalRoundNumber
+              ? `R${String(operationalRoundNumber).padStart(2, "0")}`
+              : "DONE"}
+          </span>
+        </div>
+      </div>
+
+      <div className="min-w-0 space-y-4 p-3 sm:p-4">
+        {operationError ? (
+          <div className="border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+            {operationError}
+          </div>
+        ) : null}
+
+        {game.status === "COMPLETED" ? (
+          <div className="border border-zinc-200 bg-zinc-50 px-3 py-4 text-sm font-bold text-zinc-500">
+            모든 매치가 종료되었습니다.
+          </div>
+        ) : activeMatches.length > 0 ? (
+          <div className="space-y-4">
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
-                <span>입장 큐</span>
-                <span>{pendingMatches.length}코트</span>
+              <div className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
+                <span>진행 중</span>
+                <span>{operationBoardSummary}</span>
               </div>
-              {pendingMatches.map((match) => (
-                <div
-                  key={getMatchKey(match.roundNumber, match.courtNumber)}
-                  className="border border-zinc-800 bg-zinc-900/70 p-3"
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-300">
-                      코트 {String(match.courtNumber).padStart(2, "0")}
-                    </span>
-                    <span className="text-[10px] font-bold text-zinc-500">
-                      R{String(match.roundNumber).padStart(2, "0")}
-                    </span>
-                  </div>
-                  <div className="space-y-1 text-xs font-bold text-zinc-200">
-                    <div>
-                      <span className="mr-2 text-emerald-300">A</span>
-                      {formatTeamLine(match.teamAIds, participantById)}
-                    </div>
-                    <div>
-                      <span className="mr-2 text-emerald-300">B</span>
-                      {formatTeamLine(match.teamBIds, participantById)}
-                    </div>
-                  </div>
-                  <Button
-                    className="mt-3 h-10 w-full rounded-none bg-emerald-500 text-xs font-black tracking-widest text-zinc-950 hover:bg-emerald-400"
-                    onClick={() => void handleStartMatch(match.roundNumber, match.courtNumber)}
-                    disabled={isBusy}
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 md:grid-cols-3 xl:grid-cols-4">
+                {activeMatches.map((match) => (
+                  <OperationCourtTile
+                    key={getMatchKey(match.roundNumber, match.courtNumber)}
+                    match={match}
+                    participantsById={participantById}
+                    tone="active"
                   >
-                    매치 시작
-                  </Button>
+                    {renderActiveMatchActions(match)}
+                  </OperationCourtTile>
+                ))}
+              </div>
+            </div>
+
+            {pendingMatches.length > 0 ? (
+              <div className="space-y-2 border-t border-zinc-100 pt-4">
+                <div className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
+                  <span>다음 입장</span>
+                  <span>{pendingMatches.length}코트 입장 대기</span>
                 </div>
-              ))}
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 md:grid-cols-3 xl:grid-cols-4">
+                  {pendingMatches.map((match) => (
+                    <OperationCourtTile
+                      key={getMatchKey(match.roundNumber, match.courtNumber)}
+                      match={match}
+                      participantsById={participantById}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : pendingMatches.length > 0 ? (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
+                <span>{game.status === "NOT_STARTED" ? "대기 코트" : "입장 대기"}</span>
+                <span>{operationBoardSummary}</span>
+              </div>
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 md:grid-cols-3 xl:grid-cols-4">
+                {pendingMatches.map((match) => (
+                  <OperationCourtTile
+                    key={getMatchKey(match.roundNumber, match.courtNumber)}
+                    match={match}
+                    participantsById={participantById}
+                  >
+                    {game.status === "IN_PROGRESS" ? (
+                      <Button
+                        className="h-10 w-full rounded-none bg-emerald-500 text-xs font-black tracking-widest text-zinc-950 hover:bg-emerald-400"
+                        onClick={() =>
+                          void handleStartMatch(match.roundNumber, match.courtNumber)
+                        }
+                        disabled={isBusy}
+                      >
+                        매치 시작
+                      </Button>
+                    ) : null}
+                  </OperationCourtTile>
+                ))}
+              </div>
             </div>
-          ) : (
-            <div className="border border-zinc-800 bg-zinc-900/70 px-3 py-4 text-sm font-bold text-zinc-200">
-              입장 대상이 없습니다. 대진표를 편집해 참가자를 배정해주세요.
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+
+            {game.status === "NOT_STARTED" ? (
+              <Button
+                className="h-11 w-full rounded-none bg-emerald-500 text-xs font-black tracking-widest text-zinc-950 hover:bg-emerald-400"
+                onClick={() => void handleStartGame()}
+                disabled={isBusy || pendingMatches.length === 0}
+              >
+                자유게임 시작
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="border border-zinc-200 bg-zinc-50 px-3 py-4 text-sm font-bold text-zinc-500">
+            입장 대상이 없습니다. 대진표를 편집해 참가자를 배정해주세요.
+          </div>
+        )}
+      </div>
+    </section>
   ) : null;
 
   if (isLoading || isPageLoading) {
@@ -1605,384 +1842,263 @@ export default function ManagerGameDetailPage() {
     return null;
   }
 
+  const headerRoundLabel = `${String(
+    operationalRoundNumber ||
+      currentOperationalRound?.roundNumber ||
+      activeRound?.roundNumber ||
+      displayRoundGroups[0]?.roundNumber ||
+      1
+  ).padStart(2, "0")}/${String(displayRoundGroups.length).padStart(2, "0")}`;
+  const headerGradeTypeLabel =
+    game.gradeType === "REGIONAL" ? "지역 급수" : "전국 급수";
+
   return (
-    <div className="min-h-screen bg-zinc-50 pb-20">
+    <div className="min-h-screen bg-zinc-50 pb-28 lg:pb-20">
       <div className="sticky top-16 z-30 border-b-4 border-emerald-600 bg-zinc-950 text-white">
-        <div className="container mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-          <div className="flex items-center gap-4">
+        <div className="container mx-auto flex min-h-16 max-w-6xl items-center gap-2 px-4 py-2 sm:gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <Link href="/court-manager">
               <Button
                 variant="ghost"
                 size="icon"
-                className="rounded-none text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                className="h-11 w-11 shrink-0 rounded-none text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                aria-label="코트매니저로 돌아가기"
               >
                 <ChevronLeft className="h-5 w-5" />
               </Button>
             </Link>
-            <div className="h-6 w-px bg-zinc-800" />
-            <div className="flex items-center gap-3">
+            <div className="hidden h-6 w-px bg-zinc-800 sm:block" />
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
               <div className="inline-flex items-center gap-1.5 rounded-none border border-emerald-500/30 bg-emerald-500/20 px-2 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-400">
                 <span className="h-1.5 w-1.5 animate-pulse bg-emerald-400" />
                 {getGameStatusLabel(game.status)}
               </div>
-              <h1 className="hidden font-display text-lg font-bold uppercase tracking-tight sm:block">
+              <h1 className="min-w-0 flex-1 truncate font-display text-sm font-bold uppercase tracking-tight text-white sm:text-lg">
                 {game.title}
               </h1>
+              <div className="hidden shrink-0 items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-widest text-zinc-400 lg:flex">
+                <span>{game.participants.length}명</span>
+                <span className="h-1 w-1 bg-zinc-700" />
+                <span>{String(game.courtCount).padStart(2, "0")}코트</span>
+                <span className="h-1 w-1 bg-zinc-700" />
+                <span>R{headerRoundLabel}</span>
+                <span className="hidden h-1 w-1 bg-zinc-700 xl:block" />
+                <span className="hidden xl:inline">
+                  {getMatchRecordModeLabel(game.matchRecordMode)}
+                </span>
+                <span className="hidden h-1 w-1 bg-zinc-700 xl:block" />
+                <span className="hidden xl:inline">{headerGradeTypeLabel}</span>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              className="hidden h-9 rounded-none border-2 border-zinc-700 bg-zinc-900 px-3 text-[10px] font-mono font-bold tracking-widest text-zinc-100 shadow-none hover:bg-zinc-800 sm:flex"
-              onClick={() => void handleCopyShareLink()}
-            >
-              <Copy className="mr-2 h-3 w-3" />
-              {copyLabel}
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-11 shrink-0 rounded-none border-2 border-zinc-700 bg-zinc-900 px-3 text-[10px] font-mono font-bold tracking-widest whitespace-nowrap text-zinc-100 shadow-none hover:bg-zinc-800"
+            onClick={openSettingsEditor}
+            disabled={isBusy}
+            aria-label="기본 정보 수정"
+          >
+            <PencilLine className="h-3.5 w-3.5 sm:mr-2" />
+            <span className="hidden sm:inline">수정</span>
+          </Button>
+          <Button
+            size="sm"
+            className="h-11 shrink-0 rounded-none border-2 border-zinc-700 bg-zinc-900 px-3 text-[10px] font-mono font-bold tracking-widest whitespace-nowrap text-zinc-100 shadow-none hover:bg-zinc-800"
+            onClick={() => void handleCopyShareLink()}
+            aria-label="공유 링크 복사"
+          >
+            <Copy className="h-3.5 w-3.5 sm:mr-2" />
+            <span className="hidden sm:inline">{copyLabel}</span>
+          </Button>
         </div>
       </div>
 
-      <div className="container mx-auto max-w-6xl px-4 py-8">
+      <div className="container mx-auto min-w-0 max-w-6xl px-4 py-8">
         {pageError && (
           <div className="mb-6 border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
             {pageError}
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-          <div className="space-y-8 lg:col-span-8">
-            <div className="border-2 border-zinc-200 bg-white px-4 py-4 sm:px-5">
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 lg:max-w-[42%]">
-                    <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
-                      기본 정보
-                    </div>
-
-                    {isEditingSettings ? (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2 sm:flex-nowrap">
-                        <input
-                          value={settingsDraft.title}
-                          onChange={(event) =>
-                            setSettingsDraft((prev) =>
-                              prev ? { ...prev, title: event.target.value } : prev
-                            )
-                          }
-                          onKeyDown={(event) => {
-                            if (event.nativeEvent.isComposing) {
-                              return;
-                            }
-
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              void handleSaveSettings();
-                            }
-
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              closeSettingsEditor();
-                            }
-                          }}
-                          autoFocus
-                          className="h-10 min-w-[180px] flex-1 rounded-none border-0 border-b-2 border-zinc-300 bg-transparent px-0 font-display text-2xl font-black tracking-tight text-zinc-950 focus:border-zinc-900 focus:outline-none"
-                          placeholder="세션 이름"
-                        />
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            className="h-9 rounded-none bg-zinc-950 px-3 text-xs font-bold text-white hover:bg-zinc-800"
-                            onClick={() => void handleSaveSettings()}
-                            disabled={operationSubmitting}
-                          >
-                            저장
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-9 rounded-none px-2 text-xs font-bold text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
-                            onClick={closeSettingsEditor}
-                            disabled={operationSubmitting}
-                          >
-                            취소
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-1.5 flex min-w-0 items-center gap-2">
-                        <h2 className="truncate font-display text-2xl font-black uppercase tracking-tight text-zinc-950">
-                          {game.title}
-                        </h2>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 rounded-none text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
-                          onClick={openSettingsEditor}
-                          disabled={isBusy}
-                          aria-label="게임 제목 수정"
-                        >
-                          <PencilLine className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-end lg:max-w-[25rem] xl:max-w-[30rem]">
-                    <label className="block min-w-0 sm:w-40">
-                      <span className="mb-1 block text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
-                        기록 방식
-                      </span>
-                      <Select
-                        variant="brutalist"
-                        size="compact"
-                        value={game.matchRecordMode}
-                        options={recordModeSelectOptions}
-                        disabled={isRecordModeLocked || isBusy}
-                        onChange={(value) =>
-                          void handleChangeMatchRecordMode(value as MatchRecordMode)
-                        }
-                      />
-                      {isRecordModeLocked ? (
-                        <span className="mt-1 block text-[10px] font-bold text-zinc-400">
-                          시작 후 변경 불가
-                        </span>
-                      ) : null}
-                    </label>
-
-                    <label className="block min-w-0 sm:w-36">
-                      <span className="mb-1 block text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400">
-                        급수 기준
-                      </span>
-                      <Select
-                        variant="brutalist"
-                        size="compact"
-                        value={game.gradeType}
-                        options={GRADE_TYPE_OPTIONS}
-                        disabled={isBusy}
-                        onChange={(value) =>
-                          void handleChangeGradeType(value as Game["gradeType"])
-                        }
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                {settingsError ? (
-                  <div className="border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
-                    {settingsError}
-                  </div>
-                ) : null}
-
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-zinc-100 pt-3 text-xs font-mono font-bold uppercase tracking-widest text-zinc-500">
-                  <span className="inline-flex items-baseline gap-2">
-                    <span className="text-zinc-400">상태</span>
-                    <span className="text-zinc-950">{getGameStatusLabel(game.status)}</span>
-                  </span>
-                  <span className="h-3 w-px bg-zinc-200" />
-                  <span className="inline-flex items-baseline gap-2">
-                    <span className="text-zinc-400">참가자</span>
-                    <span className="text-zinc-950">{game.participants.length}명</span>
-                  </span>
-                  <span className="h-3 w-px bg-zinc-200" />
-                  <span className="inline-flex items-baseline gap-2">
-                    <span className="text-zinc-400">코트</span>
-                    <span className="text-zinc-950">
-                      {String(game.courtCount).padStart(2, "0")}
-                    </span>
-                  </span>
-                  <span className="h-3 w-px bg-zinc-200" />
-                  <span className="inline-flex items-baseline gap-2">
-                    <span className="text-zinc-400">라운드</span>
-                    <span className="text-emerald-600">
-                      {String(
-                        operationalRoundNumber ||
-                          currentOperationalRound?.roundNumber ||
-                          activeRound?.roundNumber ||
-                          displayRoundGroups[0]?.roundNumber ||
-                          1
-                      ).padStart(2, "0")}
-                      <span className="text-zinc-300">
-                        /{String(displayRoundGroups.length).padStart(2, "0")}
-                      </span>
-                    </span>
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="lg:hidden">{operationPanel}</div>
-
-            <div className="flex flex-col gap-3 border-b border-zinc-200 pb-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="font-display text-xl font-black tracking-tight text-zinc-950">
-                  대진표
-                </h2>
-                <p className="mt-1 text-xs font-mono text-zinc-500">
-                  라운드별 코트 배정과 현재 진행 상태를 확인합니다.
-                </p>
-              </div>
-              {isOperator && !isEditingSchedule ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 shrink-0 rounded-none border-zinc-300 px-4 text-xs font-bold text-zinc-700 hover:border-zinc-950 hover:bg-zinc-50 hover:text-zinc-950"
-                  onClick={openScheduleEditor}
-                  disabled={isBusy}
-                >
-                  <PencilLine className="mr-2 h-3.5 w-3.5" />
-                  수정
-                </Button>
-              ) : null}
-            </div>
-
-            {isEditingSchedule ? (
-              <div className="border-2 border-zinc-950 bg-white px-3 py-3 sm:px-4">
-                <div className="flex flex-col gap-3">
-                  <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <h3 className="font-display text-base font-black uppercase tracking-tight text-zinc-950">
-                        대진표 편집
-                      </h3>
-                      <span className="border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-700">
-                        편집 중
-                      </span>
-                    </div>
-                    <p className="text-[11px] font-mono text-zinc-500 sm:text-right">
-                      슬롯을 눌러 참가자를 바꾸고, 저장 전까지는 임시 대진표로 유지됩니다.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 border-t border-zinc-100 pt-3 lg:grid-cols-[minmax(10rem,1fr)_11rem_6.5rem_7.5rem]">
-                    <Button
-                      className="h-11 rounded-none bg-emerald-500 px-3 text-xs font-black tracking-widest text-slate-950 hover:bg-emerald-400"
-                      onClick={() => void handleRunScheduleAiPreview()}
-                      disabled={isBusy}
-                    >
-                      {isAiPreviewSubmitting ? (
-                        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Activity className="mr-2 h-4 w-4" />
-                      )}
-                      {isAiPreviewSubmitting ? "AI 배정 중..." : "AI 자동 배정"}
-                    </Button>
-                    <Select
-                      variant="brutalist"
-                      size="compact"
-                      value={existingAssignmentPolicy}
-                      options={assignmentPolicySelectOptions}
-                      disabled={isBusy}
-                      onChange={(value) =>
-                        setExistingAssignmentPolicy(
-                          value as AssignmentPreviewExistingAssignmentPolicy
-                        )
-                      }
-                      className="min-w-0"
-                    />
-                    <Button
-                      variant="outline"
-                      className="h-11 rounded-none border-zinc-200 text-xs font-bold"
-                      onClick={closeScheduleEditor}
-                      disabled={isBusy}
-                    >
-                      변경 취소
-                    </Button>
-                    <Button
-                      className="h-11 rounded-none bg-zinc-950 px-3 text-xs font-bold text-white hover:bg-zinc-800"
-                      onClick={() => void handleSaveSchedule()}
-                      disabled={isBusy}
-                    >
-                      대진표 저장
-                    </Button>
-                  </div>
-                </div>
-
-                {scheduleError ? (
-                  <div className="mt-3 border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
-                    {scheduleError}
-                  </div>
-                ) : null}
-                {aiPreviewError ? (
-                  <div className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
-                    {aiPreviewError}
-                  </div>
-                ) : null}
-              </div>
+        <div className="grid min-w-0 grid-cols-1 gap-8 lg:grid-cols-12">
+          <div className="flex min-w-0 flex-col gap-6 lg:col-span-8 lg:gap-8">
+            {isOperator ? (
+              <div className="order-1 min-w-0">{operationBoard}</div>
             ) : null}
 
-            <div className="space-y-12">
-              {displayRoundGroups.map((round) => {
-                return (
-                  <div key={round.roundNumber} className="relative">
-                    <div className="mb-6 flex items-center gap-4">
-                      <div className="h-px flex-1 bg-zinc-200" />
-                      <div
-                        className={`border-2 px-4 py-1.5 text-xs font-mono font-bold uppercase tracking-widest ${
-                          round.visualStatus === "active"
-                            ? "border-emerald-600 bg-emerald-50 text-emerald-700"
-                            : round.visualStatus === "completed"
-                            ? "border-zinc-300 bg-zinc-100 text-zinc-500"
-                            : "border-zinc-300 bg-white text-zinc-400"
-                        }`}
-                      >
-                        Round {String(round.roundNumber).padStart(2, "0")}
-                        {round.visualStatus === "active" && (
-                          <span className="ml-2 animate-pulse text-emerald-500">●</span>
-                        )}
+            <div className="order-3 space-y-4 lg:order-3">
+              <div className="flex flex-col gap-3 border-b border-zinc-200 pb-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 className="font-display text-xl font-black tracking-tight text-zinc-950">
+                    대진표
+                  </h2>
+                  <p className="mt-1 text-xs font-mono text-zinc-500">
+                    라운드별 코트 배정과 현재 진행 상태를 확인합니다.
+                  </p>
+                </div>
+                {isOperator && !isEditingSchedule ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full shrink-0 rounded-none border-zinc-300 px-4 text-xs font-bold text-zinc-700 hover:border-zinc-950 hover:bg-zinc-50 hover:text-zinc-950 sm:w-auto"
+                    onClick={openScheduleEditor}
+                    disabled={isBusy}
+                  >
+                    <PencilLine className="mr-2 h-3.5 w-3.5" />
+                    대진표 수정
+                  </Button>
+                ) : null}
+              </div>
+
+              {isEditingSchedule ? (
+                <div className="border-2 border-zinc-950 bg-white px-3 py-3 sm:px-4">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <h3 className="font-display text-base font-black uppercase tracking-tight text-zinc-950">
+                          대진표 편집
+                        </h3>
+                        <span className="border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-700">
+                          편집 중
+                        </span>
                       </div>
-                      <div className="h-px flex-1 bg-zinc-200" />
+                      <p className="text-[11px] font-mono text-zinc-500 sm:text-right">
+                        슬롯을 눌러 참가자를 바꾸고, 저장 전까지는 임시 대진표로 유지됩니다.
+                      </p>
                     </div>
 
-                    <div className="grid gap-6 sm:grid-cols-2">
-                      {round.courts.map((court, courtIndex) => {
-                        return (
-                          <div
-                            key={`${round.roundNumber}-${court.match.courtNumber}`}
-                            className="space-y-3"
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
-                                Court {String(courtIndex + 1).padStart(2, "0")}
-                              </span>
-                            </div>
-                            <BadmintonCourt
-                              court={court}
-                              status={toVisualMatchStatus(court.match)}
-                              isEditable={isEditingSchedule}
-                              isInteractionDisabled={isBusy}
-                              selectedTargetSlot={
-                                selectedScheduleTarget?.roundNumber === round.roundNumber &&
-                                selectedScheduleTarget?.courtNumber ===
-                                  court.match.courtNumber
-                                  ? selectedScheduleTarget.slotIndex
-                                  : null
-                              }
-                              onSelectSlot={(slotIndex) =>
-                                handleSelectScheduleTarget(
-                                  round.roundNumber,
-                                  court.match.courtNumber,
-                                  slotIndex
-                                )
-                              }
-                            />
-                          </div>
-                        );
-                      })}
+                    <div className="grid grid-cols-2 gap-2 border-t border-zinc-100 pt-3 lg:grid-cols-[minmax(10rem,1fr)_11rem_6.5rem_7.5rem]">
+                      <Button
+                        className="h-11 rounded-none bg-emerald-500 px-3 text-xs font-black tracking-widest text-slate-950 hover:bg-emerald-400"
+                        onClick={() => void handleRunScheduleAiPreview()}
+                        disabled={isBusy}
+                      >
+                        {isAiPreviewSubmitting ? (
+                          <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Activity className="mr-2 h-4 w-4" />
+                        )}
+                        {isAiPreviewSubmitting ? "AI 배정 중..." : "AI 자동 배정"}
+                      </Button>
+                      <Select
+                        variant="brutalist"
+                        size="compact"
+                        value={existingAssignmentPolicy}
+                        options={assignmentPolicySelectOptions}
+                        disabled={isBusy}
+                        onChange={(value) =>
+                          setExistingAssignmentPolicy(
+                            value as AssignmentPreviewExistingAssignmentPolicy
+                          )
+                        }
+                        className="min-w-0"
+                      />
+                      <Button
+                        variant="outline"
+                        className="h-11 rounded-none border-zinc-200 text-xs font-bold"
+                        onClick={closeScheduleEditor}
+                        disabled={isBusy}
+                      >
+                        변경 취소
+                      </Button>
+                      <Button
+                        className="h-11 rounded-none bg-zinc-950 px-3 text-xs font-bold text-white hover:bg-zinc-800"
+                        onClick={() => void handleSaveSchedule()}
+                        disabled={isBusy}
+                      >
+                        대진표 저장
+                      </Button>
                     </div>
                   </div>
-                );
-              })}
+
+                  {scheduleError ? (
+                    <div className="mt-3 border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+                      {scheduleError}
+                    </div>
+                  ) : null}
+                  {aiPreviewError ? (
+                    <div className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
+                      {aiPreviewError}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className={isEditingSchedule ? "space-y-12" : "space-y-4"}>
+                {displayRoundGroups.map((round) => {
+                  return isEditingSchedule ? (
+                    <div key={round.roundNumber} className="relative">
+                      <div className="mb-6 flex items-center gap-4">
+                        <div className="h-px flex-1 bg-zinc-200" />
+                        <div
+                          className={`border-2 px-4 py-1.5 text-xs font-mono font-bold uppercase tracking-widest ${
+                            round.visualStatus === "active"
+                              ? "border-emerald-600 bg-emerald-50 text-emerald-700"
+                              : round.visualStatus === "completed"
+                              ? "border-zinc-300 bg-zinc-100 text-zinc-500"
+                              : "border-zinc-300 bg-white text-zinc-400"
+                          }`}
+                        >
+                          Round {String(round.roundNumber).padStart(2, "0")}
+                          {round.visualStatus === "active" && (
+                            <span className="ml-2 animate-pulse text-emerald-500">●</span>
+                          )}
+                        </div>
+                        <div className="h-px flex-1 bg-zinc-200" />
+                      </div>
+
+                      <div className="grid gap-6 sm:grid-cols-2">
+                        {round.courts.map((court, courtIndex) => {
+                          return (
+                            <div
+                              key={`${round.roundNumber}-${court.match.courtNumber}`}
+                              className="space-y-3"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                                  Court {String(courtIndex + 1).padStart(2, "0")}
+                                </span>
+                              </div>
+                              <BadmintonCourt
+                                court={court}
+                                status={toVisualMatchStatus(court.match)}
+                                isEditable={isEditingSchedule}
+                                isInteractionDisabled={isBusy}
+                                selectedTargetSlot={
+                                  selectedScheduleTarget?.roundNumber === round.roundNumber &&
+                                  selectedScheduleTarget?.courtNumber ===
+                                    court.match.courtNumber
+                                    ? selectedScheduleTarget.slotIndex
+                                    : null
+                                }
+                                onSelectSlot={(slotIndex) =>
+                                  handleSelectScheduleTarget(
+                                    round.roundNumber,
+                                    court.match.courtNumber,
+                                    slotIndex
+                                  )
+                                }
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <CompactScheduleRound
+                      key={round.roundNumber}
+                      round={round}
+                      participantById={participantById}
+                    />
+                  );
+                })}
+              </div>
             </div>
           </div>
 
           <div className="space-y-6 lg:col-span-4">
-            {isOperator && (
-              <>
-                <div className="hidden lg:block">{operationPanel}</div>
-              </>
-            )}
-
             <div className="border-2 border-zinc-200 bg-white">
               <div className="flex items-center justify-between gap-3 border-b-2 border-zinc-200 bg-zinc-50 p-4">
                 <div>
@@ -1996,7 +2112,7 @@ export default function ManagerGameDetailPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-9 shrink-0 rounded-none border-zinc-200 px-3 text-xs font-bold"
+                  className="h-11 shrink-0 rounded-none border-zinc-300 bg-white px-3.5 text-xs font-bold hover:border-zinc-950 hover:bg-zinc-50"
                   onClick={() => {
                     setParticipantError("");
                     setIsParticipantManagerOpen(true);
@@ -2007,55 +2123,211 @@ export default function ManagerGameDetailPage() {
                 </Button>
               </div>
 
-              <div className="max-h-[500px] divide-y-2 divide-zinc-100 overflow-y-auto">
-                {participantViews.map((participant) => (
-                  <div
-                    key={participant.id}
-                    className="flex items-center justify-between p-4 transition-colors hover:bg-zinc-50"
+              <div className="divide-y-2 divide-zinc-100 lg:hidden">
+                {mobileParticipantViews.map((participant) =>
+                  renderParticipantSummaryRow(participant)
+                )}
+
+                {hiddenMobileParticipantCount > 0 ? (
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between border-t-2 border-zinc-100 bg-zinc-50 px-4 py-3 text-left text-xs font-bold text-zinc-700 hover:bg-zinc-100"
+                    onClick={() => {
+                      setParticipantError("");
+                      setIsParticipantManagerOpen(true);
+                    }}
                   >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`h-2 w-2 rounded-none ${
-                          participant.status === "playing"
-                            ? "bg-emerald-500"
-                            : "bg-zinc-300"
-                        }`}
-                      />
-                      <div>
-                        <div className="text-sm font-bold text-zinc-950">
-                          {participant.name}
-                        </div>
-                        <div className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">
-                          {participant.gender === "MALE" ? "M" : "F"}/
-                          {participant.ageGroup} · {participant.gamesAssigned} Matches
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div
-                        className={`text-[10px] font-mono font-bold uppercase tracking-widest ${
-                          participant.status === "playing"
-                            ? "text-emerald-600"
-                            : "text-zinc-400"
-                        }`}
-                      >
-                        {participant.status}
-                      </div>
-                      <div className="mt-1 text-xs font-bold text-zinc-500">
-                        {participant.winCount ?? "-"}W / {participant.lossCount ?? "-"}L
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                    <span>전체 명단 / 추가</span>
+                    <span className="font-mono text-zinc-400">
+                      +{hiddenMobileParticipantCount}명
+                    </span>
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="hidden max-h-[500px] divide-y-2 divide-zinc-100 overflow-y-auto lg:block">
+                {participantViews.map((participant) =>
+                  renderParticipantSummaryRow(participant)
+                )}
               </div>
             </div>
           </div>
         </div>
       </div>
 
+      {isEditingSettings ? (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto overscroll-contain bg-zinc-950/50 px-4 py-8"
+          onClick={closeSettingsEditor}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="flex w-full max-w-xl flex-col overflow-hidden rounded-none border-2 border-slate-900 bg-white shadow-[6px_6px_0px_0px_rgba(15,23,42,1)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b-2 border-slate-900 px-5 py-4">
+              <div>
+                <h3 className="font-display text-xl font-black tracking-tight text-slate-900">
+                  기본 정보 수정
+                </h3>
+                <p className="mt-1 text-xs font-mono text-slate-500">
+                  세션명, 기록 방식, 급수 기준을 수정합니다.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-11 w-11 shrink-0 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
+                onClick={closeSettingsEditor}
+                aria-label="기본 정보 수정 닫기"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="grid gap-4 p-5">
+              <label className="block min-w-0">
+                <span className="mb-1 block text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                  세션명
+                </span>
+                <input
+                  value={settingsDraft.title}
+                  onChange={(event) =>
+                    setSettingsDraft((prev) =>
+                      prev ? { ...prev, title: event.target.value } : prev
+                    )
+                  }
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) {
+                      return;
+                    }
+
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleSaveSettings();
+                    }
+
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      closeSettingsEditor();
+                    }
+                  }}
+                  autoFocus
+                  className="h-12 w-full min-w-0 rounded-none border-2 border-zinc-200 bg-zinc-50 px-3 font-display text-lg font-black tracking-tight text-zinc-950 focus:border-zinc-950 focus:bg-white focus:outline-none"
+                  placeholder="세션 이름"
+                />
+              </label>
+
+              <div className="grid gap-4">
+                <fieldset className="min-w-0">
+                  <legend className="mb-1 flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                    <span>기록 방식</span>
+                    {isRecordModeLocked ? (
+                      <span className="border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[9px] tracking-normal text-zinc-400">
+                        시작 후 잠김
+                      </span>
+                    ) : null}
+                  </legend>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {recordModeOptions.map((mode) => {
+                      const isSelected = settingsDraft.matchRecordMode === mode;
+
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          disabled={isRecordModeLocked || isBusy}
+                          onClick={() =>
+                            setSettingsDraft((prev) =>
+                              prev ? { ...prev, matchRecordMode: mode } : prev
+                            )
+                          }
+                          className={`h-11 rounded-none border-2 px-3 text-left text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                            isSelected
+                              ? "border-teal-500 bg-teal-50 text-slate-950"
+                              : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-900 hover:bg-white"
+                          }`}
+                          aria-pressed={isSelected}
+                        >
+                          {getMatchRecordModeLabel(mode)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+
+                <fieldset className="min-w-0">
+                  <legend className="mb-1 block text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
+                    급수 기준
+                  </legend>
+                  <div className="grid grid-cols-2 gap-2">
+                    {GRADE_TYPE_OPTIONS.map((option) => {
+                      const gradeType = option.value as Game["gradeType"];
+                      const isSelected = settingsDraft.gradeType === gradeType;
+
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() =>
+                            setSettingsDraft((prev) =>
+                              prev ? { ...prev, gradeType } : prev
+                            )
+                          }
+                          className={`h-11 rounded-none border-2 px-3 text-left text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                            isSelected
+                              ? "border-teal-500 bg-teal-50 text-slate-950"
+                              : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-900 hover:bg-white"
+                          }`}
+                          aria-pressed={isSelected}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              </div>
+
+              {settingsError ? (
+                <div className="border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+                  {settingsError}
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-2 gap-2 border-t border-zinc-100 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 rounded-none border-zinc-200 text-xs font-bold"
+                  onClick={closeSettingsEditor}
+                  disabled={operationSubmitting}
+                >
+                  취소
+                </Button>
+                <Button
+                  type="button"
+                  className="h-11 rounded-none bg-zinc-950 text-xs font-black tracking-widest text-white hover:bg-zinc-800"
+                  onClick={() => void handleSaveSettings()}
+                  disabled={operationSubmitting}
+                >
+                  {operationSubmitting ? (
+                    <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  저장
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {isParticipantManagerOpen ? (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/50 px-4 py-8"
+          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto overscroll-contain bg-zinc-950/50 px-4 py-8"
           onClick={() => setIsParticipantManagerOpen(false)}
         >
           <div
@@ -2077,7 +2349,7 @@ export default function ManagerGameDetailPage() {
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-10 w-10 shrink-0 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
+                className="h-11 w-11 shrink-0 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
                 onClick={() => setIsParticipantManagerOpen(false)}
                 aria-label="참가자 관리 닫기"
               >
@@ -2096,36 +2368,12 @@ export default function ManagerGameDetailPage() {
                   </span>
                 </div>
                 <div className="divide-y divide-zinc-100">
-                  {participantViews.map((participant) => (
-                    <div
-                      key={participant.id}
-                      className="flex items-center justify-between gap-3 px-4 py-3"
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-bold text-zinc-950">
-                          {participant.name}
-                        </div>
-                        <div className="mt-1 text-[10px] font-mono uppercase tracking-widest text-zinc-500">
-                          {participant.gender === "MALE" ? "M" : "F"}/
-                          {participant.ageGroup} · {formatGradeLabel(participant.grade)}
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <div
-                          className={`text-[10px] font-mono font-bold uppercase tracking-widest ${
-                            participant.status === "playing"
-                              ? "text-emerald-600"
-                              : "text-zinc-400"
-                          }`}
-                        >
-                          {participant.status}
-                        </div>
-                        <div className="mt-1 text-xs font-bold text-zinc-500">
-                          {participant.gamesAssigned}회
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                  {participantViews.map((participant) =>
+                    renderParticipantSummaryRow(participant, {
+                      includeGrade: true,
+                      modal: true,
+                    })
+                  )}
                 </div>
               </div>
 
@@ -2233,7 +2481,7 @@ export default function ManagerGameDetailPage() {
 
       {selectedScheduleTargetMeta && isEditingSchedule ? (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/50 px-4 py-8"
+          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto overscroll-contain bg-zinc-950/50 px-4 py-8"
           onClick={closeScheduleAssignmentModal}
         >
           <div
@@ -2257,8 +2505,9 @@ export default function ManagerGameDetailPage() {
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-10 w-10 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
+                className="h-11 w-11 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50"
                 onClick={closeScheduleAssignmentModal}
+                aria-label="참가자 배정 닫기"
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -2273,8 +2522,7 @@ export default function ManagerGameDetailPage() {
                   <div className="mt-1 text-sm font-bold text-zinc-950">
                     {selectedTargetParticipant.name}
                     <span className="ml-2 text-xs font-mono font-bold uppercase tracking-widest text-zinc-500">
-                      {selectedTargetParticipant.gender === "MALE" ? "M" : "F"}/
-                      {selectedTargetParticipant.ageGroup}
+                      {formatParticipantProfileLabel(selectedTargetParticipant)}
                     </span>
                   </div>
                 </div>
@@ -2319,8 +2567,8 @@ export default function ManagerGameDetailPage() {
                           {participant.name}
                         </div>
                         <div className="mt-1 text-[10px] font-mono uppercase tracking-widest text-zinc-500">
-                          {participant.gender === "MALE" ? "M" : "F"}/
-                          {participant.ageGroup} · {participant.gamesAssigned} Matches
+                          {formatParticipantProfileLabel(participant)} ·{" "}
+                          {formatMatchCountLabel(participant.gamesAssigned)}
                         </div>
                       </div>
                       <div
