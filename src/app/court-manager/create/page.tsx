@@ -23,7 +23,17 @@ import {
 } from "lucide-react";
 import Select from "@/components/Select";
 import Tooltip from "@/components/Tooltip";
+import type { BadmintonCourtSlot } from "@/components/court/BadmintonCourt";
+import {
+  CourtAssignmentWorkbench,
+  type CourtAssignmentWorkbenchParticipantSummaryGroup,
+  type CourtAssignmentWorkbenchRound,
+} from "@/components/court-manager/CourtAssignmentWorkbench";
+import { BrutalistFieldButton } from "@/components/ui/brutalist-field-button";
+import { BrutalistInput } from "@/components/ui/brutalist-input";
 import { Button } from "@/components/ui/button";
+import { FieldActionGroup } from "@/components/ui/field-action-group";
+import { FormField } from "@/components/ui/form-field";
 import { SessionDateTimePicker } from "@/components/ui/session-date-time-picker";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserFacingErrorMessage, isApiError } from "@/lib/api";
@@ -508,7 +518,8 @@ function buildParticipantSummaryGroups(
     participants.map((participant) => [participant.participantId, participant])
   );
   const visited = new Set<number>();
-  const groups: ParticipantSummaryGroup[] = [];
+  const partnerGroups: ParticipantSummaryGroup[] = [];
+  const singleGroups: ParticipantSummaryGroup[] = [];
 
   for (const participant of participants) {
     if (visited.has(participant.participantId)) {
@@ -521,7 +532,7 @@ function buildParticipantSummaryGroups(
     if (partner) {
       visited.add(participant.participantId);
       visited.add(partner.participantId);
-      groups.push({
+      partnerGroups.push({
         type: "pair",
         key: [participant.participantId, partner.participantId]
           .sort((left, right) => left - right)
@@ -532,14 +543,14 @@ function buildParticipantSummaryGroups(
     }
 
     visited.add(participant.participantId);
-    groups.push({
+    singleGroups.push({
       type: "single",
       key: String(participant.participantId),
       participant,
     });
   }
 
-  return groups;
+  return [...partnerGroups, ...singleGroups];
 }
 
 function hasAssignmentChanges(currentRounds: LocalRound[], nextRounds: LocalRound[]) {
@@ -579,81 +590,19 @@ function getAiPreviewSummaryMessage(
   return "현재 구성으로는 자동 배정을 더 진행하기 어려워요. 코트와 참가자 구성을 다시 확인해주세요.";
 }
 
-const BadmintonCourt = ({
-  court,
-  roundId,
-  assignmentTarget,
-  isLocked,
-  selectAssignmentTarget,
-}: {
-  court: LocalCourt;
-  roundId: string;
-  assignmentTarget: AssignmentTarget | null;
-  isLocked: boolean;
-  selectAssignmentTarget: (roundId: string, courtId: string, slotIndex: number) => void;
-}) => {
-  return (
-    <div className="relative mx-auto flex aspect-[11/6] w-full max-w-none overflow-hidden rounded-none border-4 border-slate-900 bg-emerald-700 px-2 py-1.5 shadow-inner sm:px-3 sm:py-2.5">
-      <div className="pointer-events-none absolute inset-[9px] sm:inset-[10px]">
-        <div className="absolute inset-0 border-2 border-white/42" />
-
-        <div className="absolute inset-y-0 left-[5.7%] w-0.5 bg-white/28" />
-        <div className="absolute inset-y-0 right-[5.7%] w-0.5 bg-white/28" />
-
-        <div className="absolute inset-y-0 left-[35.2%] w-0.5 bg-white/42" />
-        <div className="absolute inset-y-0 right-[35.2%] w-0.5 bg-white/42" />
-
-        <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-white/55" />
-
-        <div className="absolute inset-x-0 top-[7.5%] h-0.5 bg-white/35" />
-        <div className="absolute inset-x-0 bottom-[7.5%] h-0.5 bg-white/35" />
-
-        <div className="absolute top-1/2 left-[5.7%] right-[64.8%] h-0.5 -translate-y-1/2 bg-white/38" />
-        <div className="absolute top-1/2 left-[64.8%] right-[5.7%] h-0.5 -translate-y-1/2 bg-white/38" />
-      </div>
-
-      <div className="relative z-10 grid h-full w-full grid-cols-2 grid-rows-2 gap-1 px-2.5 py-1.5 sm:gap-1.5 sm:px-3.5 sm:py-2.5">
-        {[0, 1, 2, 3].map((index) => {
-          const participant = court.assignedParticipants[index];
-          const isSelectedTarget =
-            assignmentTarget?.roundId === roundId &&
-            assignmentTarget.courtId === court.id &&
-            assignmentTarget.slotIndex === index;
-
-          return (
-            <div key={index} className="flex items-center justify-center p-0.5 sm:p-1">
-              {participant ? (
-                <div className="flex min-w-[56px] max-w-[84%] flex-col items-center justify-center rounded-none border-2 border-slate-900 bg-white px-1.5 py-1 shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] sm:min-w-[64px] sm:px-2.5 sm:py-1.5">
-                  <div className="w-full truncate text-center text-[9px] leading-tight font-bold text-slate-900 sm:text-[10px]">
-                    {participant.name}
-                  </div>
-                  <div className="mt-0.5 text-[6px] font-mono font-bold uppercase tracking-[0.12em] text-slate-500 sm:text-[7px] sm:tracking-widest">
-                    {getGenderLabel(participant.gender)}/{getAgeGroupLabel(participant.ageGroup)}
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  disabled={isLocked}
-                  onClick={() => selectAssignmentTarget(roundId, court.id, index)}
-                  className={`flex h-5.5 w-full max-w-[40px] items-center justify-center rounded-none border-2 text-[7px] font-bold uppercase tracking-[0.12em] shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all sm:h-6 sm:max-w-[46px] sm:text-[8px] sm:tracking-widest ${
-                    isLocked
-                      ? "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-400 shadow-none"
-                      : isSelectedTarget
-                      ? "border-teal-500 bg-teal-100 text-teal-900 ring-2 ring-teal-300/60"
-                      : "border-slate-900 bg-teal-400 text-slate-900 hover:bg-teal-300 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none"
-                  }`}
-                >
-                  등록
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
+function getBadmintonCourtSlots(court: LocalCourt): BadmintonCourtSlot[] {
+  return court.assignedParticipants.map((participant) =>
+    participant
+      ? {
+          key: participant.participantId,
+          name: participant.name,
+          meta: `${getGenderLabel(participant.gender)}/${getAgeGroupLabel(
+            participant.ageGroup
+          )}`,
+        }
+      : null
   );
-};
+}
 
 export default function CreateFreeGamePage() {
   const { isLoading, isLoggedIn } = useAuth();
@@ -690,7 +639,6 @@ export default function CreateFreeGamePage() {
   const [aiExistingAssignmentPolicy, setAiExistingAssignmentPolicy] =
     useState<AiExistingAssignmentPolicy>(DEFAULT_AI_EXISTING_ASSIGNMENT_POLICY);
   const [isGeneratingAiPreview, setIsGeneratingAiPreview] = useState(false);
-  const [isParticipantSummaryCollapsed, setIsParticipantSummaryCollapsed] = useState(true);
   const [lastAddedParticipantId, setLastAddedParticipantId] = useState<number | null>(null);
   const isAssignmentEditingLocked = isGeneratingAiPreview;
   const isCreateOverlayOpen = isLocationModalOpen || isParticipantAssignModalOpen;
@@ -1624,6 +1572,14 @@ export default function CreateFreeGamePage() {
       : step === 2
       ? "코트 배정하기"
         : "자유게임 생성하기";
+  const gameNameFieldError =
+    submitErrorField === "gameName" ? submitError : "";
+  const dateFieldError = submitErrorField === "date" ? submitError : "";
+  const locationFieldError =
+    submitErrorField === "location" ? submitError : locationSearchError;
+  const shouldShowGlobalSubmitError =
+    Boolean(submitError) &&
+    (submitErrorField === null || submitErrorField === "participants");
 
   const participantAssignModalMeta = assignmentTarget
     ? (() => {
@@ -1657,6 +1613,45 @@ export default function CreateFreeGamePage() {
   const participantSummaryMeta = hasPartnerPairs
     ? `${participants.length}명 · 파트너 ${partnerPairCount}쌍`
     : `${participants.length}명`;
+  const toWorkbenchParticipantSummaryItem = (participant: LocalParticipant) => ({
+    id: participant.participantId,
+    name: participant.name,
+    meta: `${getGenderLabel(participant.gender)} · ${getAgeGroupCompactLabel(
+      participant.ageGroup
+    )}`,
+    badge: `${participant.gamesAssigned}회`,
+  });
+  const workbenchParticipantSummaryGroups: CourtAssignmentWorkbenchParticipantSummaryGroup[] =
+    participantSummaryGroups.map((group) =>
+      group.type === "pair"
+        ? {
+            type: "pair",
+            key: group.key,
+            participants: [
+              toWorkbenchParticipantSummaryItem(group.participants[0]),
+              toWorkbenchParticipantSummaryItem(group.participants[1]),
+            ],
+          }
+        : {
+            type: "single",
+            key: group.key,
+            participant: toWorkbenchParticipantSummaryItem(group.participant),
+          }
+    );
+  const workbenchRounds: CourtAssignmentWorkbenchRound[] = rounds.map(
+    (round, roundIndex) => ({
+      id: round.id,
+      label: `라운드 ${String(roundIndex + 1).padStart(2, "0")}`,
+      canAddCourt: true,
+      canRemove: true,
+      courts: round.courts.map((court, courtIndex) => ({
+        id: court.id,
+        label: `코트 ${String(courtIndex + 1).padStart(2, "0")}`,
+        slots: getBadmintonCourtSlots(court),
+        canRemove: true,
+      })),
+    })
+  );
   const aiAssignmentIndicators = [
     !hasPartnerPairs
       ? {
@@ -1893,7 +1888,7 @@ export default function CreateFreeGamePage() {
   const isCompletionStep = step === 4;
   const isContentDrivenStep = step === 1;
   const pageContainerClassName =
-    "fixed inset-x-0 top-16 bottom-0 z-0 mx-auto flex min-h-0 max-w-5xl flex-col overflow-hidden px-4 pt-4 pb-2 md:px-8 md:pt-6 md:pb-4 lg:pt-7 lg:pb-5";
+    "mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-5xl flex-col px-4 pt-4 pb-6 md:px-8 md:pt-6 md:pb-8 lg:pt-7 lg:pb-10";
   const cardClassName =
     `relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border-2 border-slate-900 bg-white shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] ${
       isCompletionStep ? "flex-none" : isContentDrivenStep ? "md:flex-none" : ""
@@ -1955,7 +1950,7 @@ export default function CreateFreeGamePage() {
         <div className="absolute bottom-0 left-0 h-4 w-4 border-t-2 border-r-2 border-slate-200" />
         <div className="absolute right-0 bottom-0 h-4 w-4 border-t-2 border-l-2 border-slate-200" />
 
-        {submitError && (
+        {shouldShowGlobalSubmitError && (
           <div className="z-10 flex items-center border-b border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-600 md:px-8">
             {submitError}
           </div>
@@ -1986,170 +1981,165 @@ export default function CreateFreeGamePage() {
                   aria-label="자유게임 설정 본문"
                 >
                   <div className="grid gap-3 md:gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
-                      세션 이름
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="예: 주말 아침 랠리"
-                      className={`h-14 w-full rounded-none border-2 bg-slate-50 px-4 text-sm font-medium transition-colors focus:bg-white focus:outline-none ${
-                        submitErrorField === "gameName"
-                          ? "border-red-300 focus:border-red-500"
-                          : "border-slate-200 focus:border-slate-900"
-                      }`}
-                      value={gameName}
-                      onChange={(event) => {
-                        setSubmitError("");
-                        setSubmitErrorField(null);
-                        setGameName(event.target.value);
-                      }}
-                    />
-                  </div>
+                    <FormField
+                      id="free-game-name"
+                      label="세션 이름"
+                      errorText={gameNameFieldError || undefined}
+                    >
+                      {({ id, describedBy, invalid }) => (
+                        <BrutalistInput
+                          id={id}
+                          type="text"
+                          placeholder="예: 주말 아침 랠리"
+                          value={gameName}
+                          error={invalid}
+                          aria-describedby={describedBy}
+                          onChange={(event) => {
+                            setSubmitError("");
+                            setSubmitErrorField(null);
+                            setGameName(event.target.value);
+                          }}
+                        />
+                      )}
+                    </FormField>
 
-                  <div className="create-step-split-grid grid gap-3">
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
-                        날짜 및 시간
-                      </label>
-                      <SessionDateTimePicker
-                        value={date}
-                        onChange={(nextValue) => {
-                          setSubmitError("");
-                          setSubmitErrorField(null);
-                          setDate(nextValue);
-                        }}
-                        error={submitErrorField === "date"}
-                      />
+                    <div className="create-step-split-grid grid gap-3">
+                      <FormField
+                        id="free-game-scheduled-at"
+                        label="날짜 및 시간"
+                        errorText={dateFieldError || undefined}
+                      >
+                        {({ id, describedBy, invalid }) => (
+                          <SessionDateTimePicker
+                            id={id}
+                            value={date}
+                            onChange={(nextValue) => {
+                              setSubmitError("");
+                              setSubmitErrorField(null);
+                              setDate(nextValue);
+                            }}
+                            error={invalid}
+                            aria-describedby={describedBy}
+                            triggerClassName="h-14"
+                          />
+                        )}
+                      </FormField>
+                      <FormField
+                        id="free-game-location"
+                        label="장소"
+                        errorText={locationFieldError || undefined}
+                      >
+                        {({ id, describedBy, invalid }) => (
+                          <FieldActionGroup
+                            action={
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-14 w-full rounded-none border-2 border-slate-900 bg-white px-4 text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900 transition-colors hover:bg-slate-50"
+                                onClick={() => {
+                                  setLocationSearchError("");
+                                  setLocationResults([]);
+                                  setLocationQuery(location);
+                                  setIsLocationModalOpen(true);
+                                }}
+                              >
+                                <Search className="mr-2 h-4 w-4" />
+                                장소 검색
+                              </Button>
+                            }
+                          >
+                            <BrutalistFieldButton
+                              id={id}
+                              value={location}
+                              placeholder="장소를 선택해주세요"
+                              leadingIcon={<MapPin className="h-4 w-4" />}
+                              error={invalid}
+                              aria-describedby={describedBy}
+                              onClick={() => {
+                                setLocationSearchError("");
+                                setLocationResults([]);
+                                setLocationQuery(location);
+                                setIsLocationModalOpen(true);
+                              }}
+                            />
+                          </FieldActionGroup>
+                        )}
+                      </FormField>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
-                        장소
-                      </label>
-                      <div className="space-y-2">
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setLocationSearchError("");
-                              setLocationResults([]);
-                              setLocationQuery(location);
-                              setIsLocationModalOpen(true);
-                            }}
-                            className={`flex h-14 flex-1 items-center gap-3 rounded-none border-2 bg-slate-50 px-3 ${
-                              submitErrorField === "location"
-                                ? "border-red-300"
-                                : "border-slate-200 hover:border-slate-900"
-                            }`}
-                          >
-                            <MapPin className="h-4 w-4 shrink-0 text-slate-400" />
-                            <div className="min-w-0 truncate text-sm font-medium text-slate-900">
-                              {location || "장소를 선택해주세요"}
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            className="flex h-14 shrink-0 items-center justify-center rounded-none border-2 border-slate-900 bg-white px-4 text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900 transition-colors hover:bg-slate-50"
-                            onClick={() => {
-                              setLocationSearchError("");
-                              setLocationResults([]);
-                              setLocationQuery(location);
-                              setIsLocationModalOpen(true);
-                            }}
-                          >
-                            <Search className="mr-2 h-4 w-4" />
-                            장소 검색
-                          </button>
-                        </div>
 
-                        {locationSearchError ? (
-                          <div className="border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
-                            {locationSearchError}
+                    <div className="grid grid-cols-2 gap-2 border-t-2 border-slate-100 pt-3 md:gap-4">
+                      <FormField id="free-game-courts" label="코트">
+                        <div className="flex items-center gap-1.5 sm:gap-2.5">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            disabled={isGeneratingAiPreview}
+                            className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
+                            onClick={() => {
+                              if (isGeneratingAiPreview) {
+                                return;
+                              }
+                              setCourts((prev) => Math.max(1, prev - 1));
+                            }}
+                          >
+                            -
+                          </Button>
+                          <div className="flex h-9 w-[48px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-base font-bold text-white sm:h-10 sm:w-[56px] sm:text-lg">
+                            {String(courts).padStart(2, "0")}
                           </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 border-t-2 border-slate-100 pt-3 md:gap-4">
-                    <div className="min-w-0 space-y-2">
-                      <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
-                        코트
-                      </label>
-                      <div className="flex items-center gap-1.5 sm:gap-2.5">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          disabled={isGeneratingAiPreview}
-                          className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
-                          onClick={() => {
-                            if (isGeneratingAiPreview) {
-                              return;
-                            }
-                            setCourts((prev) => Math.max(1, prev - 1));
-                          }}
-                        >
-                          -
-                        </Button>
-                        <div className="flex h-9 w-[48px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-base font-bold text-white sm:h-10 sm:w-[56px] sm:text-lg">
-                          {String(courts).padStart(2, "0")}
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            disabled={isGeneratingAiPreview}
+                            className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
+                            onClick={() => {
+                              if (isGeneratingAiPreview) {
+                                return;
+                              }
+                              setCourts((prev) => prev + 1);
+                            }}
+                          >
+                            +
+                          </Button>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          disabled={isGeneratingAiPreview}
-                          className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
-                          onClick={() => {
-                            if (isGeneratingAiPreview) {
-                              return;
-                            }
-                            setCourts((prev) => prev + 1);
-                          }}
-                        >
-                          +
-                        </Button>
-                      </div>
-                    </div>
+                      </FormField>
 
-                    <div className="min-w-0 space-y-2">
-                      <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900">
-                        라운드
-                      </label>
-                      <div className="flex items-center gap-1.5 sm:gap-2.5">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          disabled={isGeneratingAiPreview}
-                          className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
-                          onClick={() => {
-                            if (isGeneratingAiPreview) {
-                              return;
-                            }
-                            setRoundCount((prev) => Math.max(1, prev - 1));
-                          }}
-                        >
-                          -
-                        </Button>
-                        <div className="flex h-9 w-[48px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-base font-bold text-white sm:h-10 sm:w-[56px] sm:text-lg">
-                          {String(roundCount).padStart(2, "0")}
+                      <FormField id="free-game-rounds" label="라운드">
+                        <div className="flex items-center gap-1.5 sm:gap-2.5">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            disabled={isGeneratingAiPreview}
+                            className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
+                            onClick={() => {
+                              if (isGeneratingAiPreview) {
+                                return;
+                              }
+                              setRoundCount((prev) => Math.max(1, prev - 1));
+                            }}
+                          >
+                            -
+                          </Button>
+                          <div className="flex h-9 w-[48px] items-center justify-center border-2 border-slate-900 bg-slate-900 font-display text-base font-bold text-white sm:h-10 sm:w-[56px] sm:text-lg">
+                            {String(roundCount).padStart(2, "0")}
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            disabled={isGeneratingAiPreview}
+                            className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
+                            onClick={() => {
+                              if (isGeneratingAiPreview) {
+                                return;
+                              }
+                              setRoundCount((prev) => prev + 1);
+                            }}
+                          >
+                            +
+                          </Button>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          disabled={isGeneratingAiPreview}
-                          className="h-9 w-9 rounded-none border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:bg-slate-50 sm:h-10 sm:w-10"
-                          onClick={() => {
-                            if (isGeneratingAiPreview) {
-                              return;
-                            }
-                            setRoundCount((prev) => prev + 1);
-                          }}
-                        >
-                          +
-                        </Button>
-                      </div>
+                      </FormField>
                     </div>
-                  </div>
                   </div>
                 </div>
               </motion.div>
@@ -2798,186 +2788,30 @@ export default function CreateFreeGamePage() {
                   role="region"
                   aria-label="코트 배정 본문"
                 >
-                  <div className="space-y-3 pb-1 md:space-y-5 md:pb-2">
-                    <div className="border-2 border-slate-200 bg-slate-50 p-2 md:p-3">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setIsParticipantSummaryCollapsed((current) => !current)
-                        }
-                        className="flex w-full items-center justify-between gap-2 text-left"
-                        aria-expanded={!isParticipantSummaryCollapsed}
-                      >
-                        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                          <h3 className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                            참가자 요약
-                          </h3>
-                          <p className="min-w-0 truncate text-[10px] font-mono text-slate-500 md:text-xs">
-                            {participantSummaryMeta}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                          <span className="hidden sm:inline">
-                            {isParticipantSummaryCollapsed ? "펼치기" : "접기"}
-                          </span>
-                          <ChevronRight
-                            className={`h-4 w-4 transition-transform ${
-                              isParticipantSummaryCollapsed ? "" : "rotate-90"
-                            }`}
-                          />
-                        </div>
-                      </button>
-
-                      <AnimatePresence initial={false}>
-                        {!isParticipantSummaryCollapsed && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.18, ease: "easeOut" }}
-                            className="overflow-hidden"
-                          >
-                            <div className="mt-3 border-t border-slate-200 pt-3">
-                              <div className="grid grid-cols-2 gap-2.5 md:gap-3 xl:grid-cols-4">
-                                {participantSummaryGroups.map((group) =>
-                                  group.type === "pair" ? (
-                                    <div key={group.key} className="relative col-span-2 xl:col-span-2">
-                                      <div className="grid grid-cols-2 gap-2.5 md:gap-3">
-                                        {group.participants.map((participant) => (
-                                          <div
-                                            key={participant.participantId}
-                                            className="flex min-w-0 items-center justify-between gap-2 border-2 border-violet-400 bg-violet-50/20 p-2 text-left text-[11px] md:p-3 md:text-xs"
-                                          >
-                                            <div className="flex min-w-0 items-center gap-1.5">
-                                              <span className="min-w-0 truncate font-bold text-slate-900">
-                                                {participant.name}
-                                              </span>
-                                              <span className="shrink-0 font-mono text-[9px] text-slate-500 md:text-[10px]">
-                                                {getGenderLabel(participant.gender)} ·{" "}
-                                                {getAgeGroupCompactLabel(participant.ageGroup)}
-                                              </span>
-                                            </div>
-                                            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] font-bold text-slate-900 md:text-[10px]">
-                                              {participant.gamesAssigned}회
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                      <div className="pointer-events-none absolute top-1/2 left-1/2 h-[3px] w-4 -translate-x-1/2 -translate-y-1/2 bg-violet-500" />
-                                    </div>
-                                  ) : (
-                                    <div
-                                      key={group.key}
-                                      className="flex min-w-0 items-center justify-between gap-2 border border-slate-200 bg-white p-2 text-left text-[11px] md:p-3 md:text-xs"
-                                    >
-                                      <div className="flex min-w-0 items-center gap-1.5">
-                                        <span className="min-w-0 truncate font-bold text-slate-900">
-                                          {group.participant.name}
-                                        </span>
-                                        <span className="shrink-0 font-mono text-[9px] text-slate-500 md:text-[10px]">
-                                          {getGenderLabel(group.participant.gender)} ·{" "}
-                                          {getAgeGroupCompactLabel(group.participant.ageGroup)}
-                                        </span>
-                                      </div>
-                                      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] font-bold text-slate-900 md:text-[10px]">
-                                        {group.participant.gamesAssigned}회
-                                      </span>
-                                    </div>
-                                  )
-                                )}
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-
-                    {rounds.length === 0 ? (
-                      <div className="border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center">
-                        <div className="text-sm font-medium text-slate-500">
-                          아직 생성된 라운드가 없습니다.
-                        </div>
-                      </div>
-                    ) : (
-                      rounds.map((round, roundIndex) => (
-                        <section
-                          key={round.id}
-                          className="rounded-sm border border-slate-200 bg-slate-50/70 p-2.5 md:p-3.5"
-                        >
-                          <div className="mx-auto w-full max-w-[760px] space-y-3 md:space-y-4 lg:max-w-[920px]">
-                            <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-2.5">
-                              <div className="flex min-w-0 items-center gap-2">
-                                <span className="bg-slate-900 px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-white md:px-3">
-                                  라운드 {String(roundIndex + 1).padStart(2, "0")}
-                                </span>
-                              </div>
-                              <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={isAssignmentEditingLocked}
-                                  className="h-7 rounded-none border border-slate-300 bg-white px-2 text-[9px] font-bold uppercase tracking-[0.14em] md:h-6 md:px-2 md:text-[10px] md:tracking-widest"
-                                  onClick={() => addCourtToRound(round.id)}
-                                >
-                                  + 코트 추가
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  disabled={isAssignmentEditingLocked}
-                                  className="h-7 w-7 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500 md:h-6 md:w-6"
-                                  onClick={() => removeRoundBlock(round.id)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-
-                            {round.courts.length === 0 ? (
-                              <div className="border-2 border-dashed border-slate-200 bg-white px-6 py-10 text-center">
-                                <div className="text-sm font-medium text-slate-500">
-                                  이 라운드에는 아직 코트가 없습니다.
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-1 gap-3 min-[390px]:grid-cols-2 md:grid-cols-2 md:gap-4 lg:flex lg:flex-wrap lg:justify-center lg:gap-5">
-                                {round.courts.map((court, courtIndex) => (
-                                  <div
-                                    key={court.id}
-                                    className="w-full min-w-0 space-y-0.5 md:space-y-1 lg:w-[264px] lg:flex-none"
-                                  >
-                                    <div className="flex items-center justify-between px-0.5">
-                                      <span className="text-[9px] font-mono font-bold uppercase tracking-[0.14em] text-slate-400 sm:text-[10px] sm:tracking-widest">
-                                        코트 {String(courtIndex + 1).padStart(2, "0")}
-                                      </span>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        disabled={isAssignmentEditingLocked}
-                                        className="h-6 w-6 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
-                                        onClick={() =>
-                                          removeCourtFromRound(round.id, court.id)
-                                        }
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
-                                    </div>
-                                    <BadmintonCourt
-                                      court={court}
-                                      roundId={round.id}
-                                      assignmentTarget={assignmentTarget}
-                                      isLocked={isAssignmentEditingLocked}
-                                      selectAssignmentTarget={selectAssignmentTarget}
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </section>
-                      ))
-                    )}
-                  </div>
+                  <CourtAssignmentWorkbench
+                    rounds={workbenchRounds}
+                    participantSummary={{
+                      meta: participantSummaryMeta,
+                      groups: workbenchParticipantSummaryGroups,
+                      initiallyCollapsed: true,
+                    }}
+                    selectedTarget={
+                      assignmentTarget
+                        ? {
+                            roundId: assignmentTarget.roundId,
+                            courtId: assignmentTarget.courtId,
+                            slotIndex: assignmentTarget.slotIndex as 0 | 1 | 2 | 3,
+                          }
+                        : null
+                    }
+                    isLocked={isAssignmentEditingLocked}
+                    onSelectSlot={(roundId, courtId, slotIndex) =>
+                      selectAssignmentTarget(roundId, courtId, slotIndex)
+                    }
+                    onAddCourt={addCourtToRound}
+                    onRemoveCourt={removeCourtFromRound}
+                    onRemoveRound={removeRoundBlock}
+                  />
                 </div>
               </motion.div>
             )}
@@ -3127,50 +2961,56 @@ export default function CreateFreeGamePage() {
               </div>
 
               <div className="modal-scroll flex-1 space-y-4 p-5">
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <MapPin className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="예: 숙지다목적체육관"
-                      className="h-12 w-full rounded-none border-2 border-slate-200 bg-slate-50 pr-4 pl-10 text-sm font-medium transition-colors focus:border-slate-900 focus:bg-white focus:outline-none"
-                      value={locationQuery}
-                      onChange={(event) => {
-                        setLocationSearchError("");
-                        setLocationResults([]);
-                        setLocationQuery(event.target.value);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void handleSearchLocation();
-                        }
-                      }}
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-12 rounded-none border-2 border-slate-900 px-4 text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900"
-                    onClick={() => void handleSearchLocation()}
-                    disabled={isSearchingLocation}
-                  >
-                    {isSearchingLocation ? (
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <>
-                        <Search className="mr-2 h-4 w-4" />
-                        검색
-                      </>
-                    )}
-                  </Button>
-                </div>
-
-                {locationSearchError ? (
-                  <div className="border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
-                    {locationSearchError}
-                  </div>
-                ) : null}
+                <FormField
+                  id="location-search-query"
+                  label="검색어"
+                  labelVisibility="sr-only"
+                  errorText={locationSearchError || undefined}
+                >
+                  {({ id, describedBy, invalid }) => (
+                    <FieldActionGroup
+                      action={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-14 w-full rounded-none border-2 border-slate-900 bg-white px-4 text-[11px] font-mono font-bold uppercase tracking-widest text-slate-900 transition-colors hover:bg-slate-50"
+                          onClick={() => void handleSearchLocation()}
+                          disabled={isSearchingLocation}
+                        >
+                          {isSearchingLocation ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <>
+                              <Search className="mr-2 h-4 w-4" />
+                              검색
+                            </>
+                          )}
+                        </Button>
+                      }
+                    >
+                      <BrutalistInput
+                        id={id}
+                        type="text"
+                        placeholder="예: 숙지다목적체육관"
+                        value={locationQuery}
+                        leadingIcon={<MapPin className="h-4 w-4" />}
+                        error={invalid}
+                        aria-describedby={describedBy}
+                        onChange={(event) => {
+                          setLocationSearchError("");
+                          setLocationResults([]);
+                          setLocationQuery(event.target.value);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void handleSearchLocation();
+                          }
+                        }}
+                      />
+                    </FieldActionGroup>
+                  )}
+                </FormField>
 
                 {locationResults.length > 0 ? (
                   <div className="space-y-2">

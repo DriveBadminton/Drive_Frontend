@@ -252,6 +252,7 @@ export function SessionDateTimePicker({
   dateBoundary,
   placeholder,
   surface = "light",
+  triggerClassName,
   "aria-describedby": ariaDescribedBy,
 }: {
   id?: string;
@@ -262,6 +263,7 @@ export function SessionDateTimePicker({
   dateBoundary?: DateBoundary;
   placeholder?: string;
   surface?: DateTimePickerSurface;
+  triggerClassName?: string;
   "aria-describedby"?: string;
 }) {
   const effectiveDateBoundary = dateBoundary ?? getDefaultDateBoundary(mode);
@@ -699,7 +701,8 @@ export function SessionDateTimePicker({
         className={cn(
           "flex h-12 w-full items-center justify-between rounded-none border-2 px-4 text-left transition-colors focus:outline-none",
           triggerSurfaceClass,
-          triggerStateClass
+          triggerStateClass,
+          triggerClassName
         )}
       >
         <div className="flex min-w-0 items-center gap-3">
