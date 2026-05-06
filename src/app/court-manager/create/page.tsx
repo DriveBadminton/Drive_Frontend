@@ -16,12 +16,9 @@ import {
   Scale,
   ShieldCheck,
   Shuffle,
-  Plus,
   X,
-  Trash2,
   UsersRound,
 } from "lucide-react";
-import Select from "@/components/Select";
 import Tooltip from "@/components/Tooltip";
 import type { BadmintonCourtSlot } from "@/components/court/BadmintonCourt";
 import {
@@ -29,6 +26,7 @@ import {
   type CourtAssignmentWorkbenchParticipantSummaryGroup,
   type CourtAssignmentWorkbenchRound,
 } from "@/components/court-manager/CourtAssignmentWorkbench";
+import { ParticipantManagementPanel } from "@/components/court-manager/ParticipantManagementPanel";
 import { BrutalistFieldButton } from "@/components/ui/brutalist-field-button";
 import { BrutalistInput } from "@/components/ui/brutalist-input";
 import { Button } from "@/components/ui/button";
@@ -476,10 +474,6 @@ function getAgeGroupCompactLabel(ageGroup: string) {
   return ageGroup.replace("s", "");
 }
 
-function getLevelCompactLabel(level: Grade) {
-  return LEVEL_COMPACT_LABELS[level] ?? level;
-}
-
 function detachPartnerLinks(partnerLinks: PartnerLinks, participantId: number): PartnerLinks {
   const nextLinks = { ...partnerLinks };
   const partnerId = nextLinks[participantId];
@@ -642,13 +636,6 @@ export default function CreateFreeGamePage() {
   const [lastAddedParticipantId, setLastAddedParticipantId] = useState<number | null>(null);
   const isAssignmentEditingLocked = isGeneratingAiPreview;
   const isCreateOverlayOpen = isLocationModalOpen || isParticipantAssignModalOpen;
-  const isParticipantNameComposingRef = useRef(false);
-  const submitParticipantAfterCompositionRef = useRef(false);
-  const skipNextParticipantEnterRef = useRef(false);
-  const participantScrollBodyRef = useRef<HTMLDivElement | null>(null);
-  const participantListViewportRef = useRef<HTMLDivElement | null>(null);
-  const participantMobileRowRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const participantDesktopRowRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const nextParticipantIdRef = useRef(1);
   const activePreviewJobIdRef = useRef<string | null>(null);
   const previewPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -795,47 +782,6 @@ export default function CreateFreeGamePage() {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (lastAddedParticipantId === null) {
-      return;
-    }
-
-    const mobileRowElement = participantMobileRowRefs.current[lastAddedParticipantId];
-    const desktopRowElement = participantDesktopRowRefs.current[lastAddedParticipantId];
-    const rowElement =
-      mobileRowElement?.offsetParent !== null
-        ? mobileRowElement
-        : desktopRowElement?.offsetParent !== null
-          ? desktopRowElement
-          : null;
-    const containerElement =
-      mobileRowElement?.offsetParent !== null
-        ? participantScrollBodyRef.current
-        : desktopRowElement?.offsetParent !== null
-          ? participantListViewportRef.current
-          : participantScrollBodyRef.current;
-    if (containerElement && rowElement && containerElement.scrollHeight > containerElement.clientHeight) {
-      const containerRect = containerElement.getBoundingClientRect();
-      const rowRect = rowElement.getBoundingClientRect();
-      const rowTop = rowRect.top - containerRect.top + containerElement.scrollTop;
-      const rowBottom = rowTop + rowRect.height;
-      const visibleTop = containerElement.scrollTop;
-      const visibleBottom = visibleTop + containerElement.clientHeight;
-
-      if (rowBottom > visibleBottom) {
-        containerElement.scrollTo({
-          top: rowBottom - containerElement.clientHeight,
-        });
-      } else if (rowTop < visibleTop) {
-        containerElement.scrollTo({
-          top: rowTop,
-        });
-      }
-    }
-
-    setLastAddedParticipantId(null);
-  }, [lastAddedParticipantId, participants]);
 
   const addRoundBlock = () => {
     if (isAssignmentEditingLocked) {
@@ -1273,9 +1219,6 @@ export default function CreateFreeGamePage() {
 
     setSubmitError("");
     setSubmitErrorField(null);
-    submitParticipantAfterCompositionRef.current = false;
-    skipNextParticipantEnterRef.current = false;
-
     const nextParticipant: LocalParticipant = {
       participantId: nextParticipantIdRef.current++,
       name: trimmedParticipantName,
@@ -1604,9 +1547,31 @@ export default function CreateFreeGamePage() {
   const participantById = new Map(
     participants.map((participant) => [participant.participantId, participant])
   );
-  const partnerSelectionSource = partnerSelectionSourceId !== null
-    ? participantById.get(partnerSelectionSourceId) ?? null
-    : null;
+  const participantManagementItems = participants.map((participant) => {
+    const partner = partnerLinks[participant.participantId]
+      ? participantById.get(partnerLinks[participant.participantId]) ?? null
+      : null;
+
+    return {
+      id: participant.participantId,
+      name: participant.name,
+      genderLabel: getGenderLabel(participant.gender),
+      ageLabel: getAgeGroupLabel(participant.ageGroup),
+      gradeLabel: participant.level,
+      gamesLabel: `${participant.gamesAssigned}회`,
+      partner: partner
+        ? {
+            id: partner.participantId,
+            name: partner.name,
+          }
+        : null,
+    };
+  });
+  const partnerSelectionSourceItem =
+    partnerSelectionSourceId !== null
+      ? participantManagementItems.find((item) => item.id === partnerSelectionSourceId) ??
+        null
+      : null;
   const participantSummaryGroups = buildParticipantSummaryGroups(participants, partnerLinks);
   const hasPartnerPairs = participantSummaryGroups.some((group) => group.type === "pair");
   const partnerPairCount = participantSummaryGroups.filter((group) => group.type === "pair").length;
@@ -2160,615 +2125,56 @@ export default function CreateFreeGamePage() {
                   role="region"
                   aria-label="참가자 구성 본문"
                 >
-                  <div className="flex h-full min-h-0 flex-col gap-4 md:h-auto">
-                    <div className="md:hidden">
-                      <div className="grid grid-cols-[minmax(0,1fr)_44px_52px_44px_44px] gap-1">
-                        <input
-                          type="text"
-                          placeholder="이름"
-                          disabled={isAssignmentEditingLocked}
-                          className={`h-11 min-w-0 w-full rounded-none border-2 bg-slate-50 px-2.5 text-[13px] font-medium transition-colors focus:bg-white focus:outline-none ${
-                            submitErrorField === "participants"
-                              ? "border-red-300 focus:border-red-500"
-                              : "border-slate-200 focus:border-slate-900"
-                          }`}
-                          value={newParticipant.name}
-                          onChange={(event) => {
-                            if (submitErrorField === "participants") {
-                              setSubmitError("");
-                              setSubmitErrorField(null);
-                            }
+                  <ParticipantManagementPanel
+                    participants={participantManagementItems}
+                    draft={{
+                      name: newParticipant.name,
+                      gender: newParticipant.gender,
+                      ageGroup: newParticipant.ageGroup,
+                      grade: newParticipant.level,
+                    }}
+                    genderOptions={[...GENDER_SELECT_OPTIONS]}
+                    ageOptions={AGE_GROUP_SELECT_OPTIONS}
+                    compactAgeOptions={AGE_GROUP_COMPACT_SELECT_OPTIONS}
+                    gradeOptions={LEVEL_SELECT_OPTIONS}
+                    compactGradeOptions={LEVEL_COMPACT_SELECT_OPTIONS}
+                    disabled={isAssignmentEditingLocked}
+                    invalid={submitErrorField === "participants"}
+                    errorText={submitErrorField === "participants" ? submitError : undefined}
+                    highlightedParticipantId={lastAddedParticipantId}
+                    onHighlightSettled={() => setLastAddedParticipantId(null)}
+                    partnerSelectionSource={partnerSelectionSourceItem}
+                    onCancelPartnerSelection={() => setPartnerSelectionSourceId(null)}
+                    onDraftChange={(draft) => {
+                      if (submitErrorField === "participants") {
+                        setSubmitError("");
+                        setSubmitErrorField(null);
+                      }
 
-                            setNewParticipant((prev) => ({
-                              ...prev,
-                              name: event.target.value,
-                            }));
-                          }}
-                          onCompositionStart={() => {
-                            isParticipantNameComposingRef.current = true;
-                            submitParticipantAfterCompositionRef.current = false;
-                            skipNextParticipantEnterRef.current = false;
-                          }}
-                          onCompositionEnd={(event) => {
-                            const composedName = event.currentTarget.value;
-
-                            isParticipantNameComposingRef.current = false;
-                            setNewParticipant((prev) => ({
-                              ...prev,
-                              name: composedName,
-                            }));
-
-                            if (submitParticipantAfterCompositionRef.current) {
-                              submitParticipantAfterCompositionRef.current = false;
-                              skipNextParticipantEnterRef.current = true;
-                              requestAnimationFrame(() => {
-                                addParticipant(composedName);
-                              });
-                            }
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key !== "Enter") {
-                              return;
-                            }
-
-                            if (skipNextParticipantEnterRef.current) {
-                              event.preventDefault();
-                              skipNextParticipantEnterRef.current = false;
-                              return;
-                            }
-
-                            const nativeEvent = event.nativeEvent as KeyboardEvent & {
-                              isComposing?: boolean;
-                              keyCode?: number;
-                            };
-                            const isComposing =
-                              isParticipantNameComposingRef.current ||
-                              nativeEvent.isComposing === true ||
-                              nativeEvent.keyCode === 229;
-
-                            event.preventDefault();
-
-                            if (isComposing) {
-                              submitParticipantAfterCompositionRef.current = true;
-                              return;
-                            }
-
-                            addParticipant();
-                          }}
-                        />
-                        <div className="min-w-0">
-                          <Select
-                            variant="brutalist"
-                            size="compact"
-                            value={newParticipant.gender}
-                            options={[...GENDER_SELECT_OPTIONS]}
-                            disabled={isAssignmentEditingLocked}
-                            onChange={(event) =>
-                              setNewParticipant((prev) => ({
-                                ...prev,
-                                gender: event as "M" | "F",
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="min-w-0">
-                          <Select
-                            variant="brutalist"
-                            size="compact"
-                            value={newParticipant.ageGroup}
-                            options={AGE_GROUP_COMPACT_SELECT_OPTIONS}
-                            disabled={isAssignmentEditingLocked}
-                            onChange={(event) =>
-                              setNewParticipant((prev) => ({
-                                ...prev,
-                                ageGroup: event,
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="min-w-0">
-                          <Select
-                            variant="brutalist"
-                            size="compact"
-                            value={newParticipant.level}
-                            options={LEVEL_COMPACT_SELECT_OPTIONS}
-                            disabled={isAssignmentEditingLocked}
-                            onChange={(event) =>
-                              setNewParticipant((prev) => ({
-                                ...prev,
-                                level: event as Grade,
-                              }))
-                            }
-                          />
-                        </div>
-                        <Button
-                          disabled={isAssignmentEditingLocked}
-                          onClick={() => addParticipant()}
-                          className="h-11 w-full rounded-none border-2 border-slate-900 bg-slate-900 p-0 text-white shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all hover:bg-slate-800 active:translate-y-0.5 active:translate-x-0.5 active:shadow-none"
-                          aria-label="참가자 추가"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="hidden items-center gap-2 md:flex md:flex-wrap">
-                      <div className="min-w-0 flex-1 md:min-w-[220px] md:flex-[1.8]">
-                        <input
-                          type="text"
-                          placeholder="이름"
-                          disabled={isAssignmentEditingLocked}
-                          className={`h-[50px] w-full rounded-none border-2 bg-slate-50 px-4 text-sm font-medium transition-colors focus:bg-white focus:outline-none ${
-                            submitErrorField === "participants"
-                              ? "border-red-300 focus:border-red-500"
-                              : "border-slate-200 focus:border-slate-900"
-                          }`}
-                          value={newParticipant.name}
-                          onChange={(event) => {
-                            if (submitErrorField === "participants") {
-                              setSubmitError("");
-                              setSubmitErrorField(null);
-                            }
-
-                            setNewParticipant((prev) => ({
-                              ...prev,
-                              name: event.target.value,
-                            }));
-                          }}
-                          onCompositionStart={() => {
-                            isParticipantNameComposingRef.current = true;
-                            submitParticipantAfterCompositionRef.current = false;
-                            skipNextParticipantEnterRef.current = false;
-                          }}
-                          onCompositionEnd={(event) => {
-                            const composedName = event.currentTarget.value;
-
-                            isParticipantNameComposingRef.current = false;
-                            setNewParticipant((prev) => ({
-                              ...prev,
-                              name: composedName,
-                            }));
-
-                            if (submitParticipantAfterCompositionRef.current) {
-                              submitParticipantAfterCompositionRef.current = false;
-                              skipNextParticipantEnterRef.current = true;
-                              requestAnimationFrame(() => {
-                                addParticipant(composedName);
-                              });
-                            }
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key !== "Enter") {
-                              return;
-                            }
-
-                            if (skipNextParticipantEnterRef.current) {
-                              event.preventDefault();
-                              skipNextParticipantEnterRef.current = false;
-                              return;
-                            }
-
-                            const nativeEvent = event.nativeEvent as KeyboardEvent & {
-                              isComposing?: boolean;
-                              keyCode?: number;
-                            };
-                            const isComposing =
-                              isParticipantNameComposingRef.current ||
-                              nativeEvent.isComposing === true ||
-                              nativeEvent.keyCode === 229;
-
-                            event.preventDefault();
-
-                            if (isComposing) {
-                              submitParticipantAfterCompositionRef.current = true;
-                              return;
-                            }
-
-                            addParticipant();
-                          }}
-                        />
-                      </div>
-                      <div className="w-[88px] shrink-0">
-                        <Select
-                          variant="brutalist"
-                          value={newParticipant.gender}
-                          options={[...GENDER_SELECT_OPTIONS]}
-                          disabled={isAssignmentEditingLocked}
-                          onChange={(event) =>
-                            setNewParticipant((prev) => ({
-                              ...prev,
-                              gender: event as "M" | "F",
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="w-[104px] shrink-0">
-                        <Select
-                          variant="brutalist"
-                          value={newParticipant.ageGroup}
-                          options={AGE_GROUP_SELECT_OPTIONS}
-                          disabled={isAssignmentEditingLocked}
-                          onChange={(event) =>
-                            setNewParticipant((prev) => ({
-                              ...prev,
-                              ageGroup: event,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="w-[104px] shrink-0">
-                        <Select
-                          variant="brutalist"
-                          value={newParticipant.level}
-                          options={LEVEL_SELECT_OPTIONS}
-                          disabled={isAssignmentEditingLocked}
-                          onChange={(event) =>
-                            setNewParticipant((prev) => ({
-                              ...prev,
-                              level: event as Grade,
-                            }))
-                          }
-                        />
-                      </div>
-                      <Button
-                        disabled={isAssignmentEditingLocked}
-                        onClick={() => addParticipant()}
-                        className="h-[50px] w-[96px] rounded-none bg-slate-900 px-6 text-xs font-bold uppercase tracking-widest text-white hover:bg-slate-800"
-                      >
-                        추가
-                      </Button>
-                    </div>
-
-                    <div
-                      className={`flex min-h-0 flex-1 flex-col overflow-hidden border-2 bg-white md:flex-none md:overflow-visible ${
-                        submitErrorField === "participants"
-                          ? "border-red-300"
-                          : "border-slate-200"
-                      }`}
-                    >
-                      {partnerSelectionSource ? (
-                        <div className="flex items-start justify-between gap-4 border-b-2 border-violet-200 bg-violet-50 px-3 py-3 md:px-4 md:py-3.5">
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700">
-                              파트너 선택 모드
-                            </div>
-                            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                              <span className="border border-violet-200 bg-white px-2 py-1 text-xs font-bold text-slate-900">
-                                {partnerSelectionSource.name}
-                              </span>
-                              <span className="truncate text-sm font-medium text-slate-700">
-                                의 파트너를 선택하세요.
-                              </span>
-                            </div>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={isAssignmentEditingLocked}
-                            className="h-9 rounded-none border-2 border-violet-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100"
-                            onClick={() => setPartnerSelectionSourceId(null)}
-                          >
-                            취소
-                          </Button>
-                        </div>
-                      ) : null}
-
-                      <div
-                        ref={participantScrollBodyRef}
-                        className="wizard-scroll min-h-0 flex-1 md:hidden"
-                        tabIndex={0}
-                        role="region"
-                        aria-label="참가자 목록"
-                      >
-                        {participants.map((participant, index) => {
-                          const partner = partnerLinks[participant.participantId]
-                            ? participantById.get(partnerLinks[participant.participantId]) ?? null
-                            : null;
-                          const isPartnerSource =
-                            partnerSelectionSourceId === participant.participantId;
-                          const isPartnerCandidate =
-                            partnerSelectionSourceId !== null &&
-                            partnerSelectionSourceId !== participant.participantId;
-
-                          return (
-                            <div
-                              key={participant.participantId}
-                              ref={(element) => {
-                                participantMobileRowRefs.current[participant.participantId] =
-                                  element;
-                              }}
-                              onClick={() => {
-                                if (isPartnerCandidate && !isAssignmentEditingLocked) {
-                                  assignPartner(participant.participantId);
-                                }
-                              }}
-                              className={`px-3 py-3 transition-colors border-b-2 border-slate-100 ${
-                                isPartnerSource
-                                  ? "bg-violet-50"
-                                  : isPartnerCandidate
-                                    ? isAssignmentEditingLocked
-                                  ? "bg-white"
-                                      : "cursor-pointer bg-white hover:bg-violet-50"
-                                    : "hover:bg-slate-50"
-                              }`}
-                            >
-                              <div className="flex items-center gap-2">
-                                <div className="min-w-0 flex flex-1 items-center gap-1.5">
-                                  <span className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
-                                    {String(index + 1).padStart(2, "0")}
-                                  </span>
-                                  <span className="min-w-0 truncate text-sm font-bold text-slate-900">
-                                    {participant.name}
-                                  </span>
-                                  <span className="shrink-0 text-[10px] font-mono text-slate-500">
-                                    {getGenderLabel(participant.gender)}·
-                                    {getAgeGroupCompactLabel(participant.ageGroup)}·
-                                    {getLevelCompactLabel(participant.level)}
-                                  </span>
-                                </div>
-                                <div className="flex shrink-0 items-center gap-1.5">
-                                {isPartnerSource ? (
-                                  <div className="flex h-8 items-center rounded-none border-2 border-violet-300 bg-violet-100 px-2.5 text-[10px] font-mono font-bold text-violet-800">
-                                    선택중
-                                  </div>
-                                ) : isPartnerCandidate ? (
-                                  <button
-                                    type="button"
-                                    disabled={isAssignmentEditingLocked}
-                                    className="flex h-8 items-center rounded-none border-2 border-violet-300 bg-violet-50 px-2.5 text-[10px] font-mono font-bold text-violet-800 hover:border-violet-400 hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      assignPartner(participant.participantId);
-                                    }}
-                                  >
-                                    연결
-                                  </button>
-                                ) : partner ? (
-                                  <>
-                                    <button
-                                      type="button"
-                                      title={partner.name}
-                                      disabled={isAssignmentEditingLocked}
-                                      className="flex h-8 max-w-[92px] items-center rounded-none border-2 border-violet-300 bg-violet-50 px-2.5 text-[10px] font-bold text-violet-800 hover:border-violet-400 hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        startPartnerSelection(participant.participantId);
-                                      }}
-                                    >
-                                      <span className="truncate">
-                                      {partner.name}
-                                      </span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={isAssignmentEditingLocked}
-                                      className="flex h-8 w-8 items-center justify-center rounded-none border-2 border-slate-200 bg-white text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        clearPartner(participant.participantId);
-                                      }}
-                                      aria-label={`${participant.name} 파트너 해제`}
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    disabled={isAssignmentEditingLocked}
-                                    className="flex h-8 items-center rounded-none border-2 border-slate-200 bg-white px-2.5 text-[10px] font-semibold text-slate-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      startPartnerSelection(participant.participantId);
-                                    }}
-                                  >
-                                    파트너 지정
-                                  </button>
-                                )}
-                                  <button
-                                    type="button"
-                                    disabled={isAssignmentEditingLocked}
-                                    className="flex h-8 w-8 items-center justify-center rounded-none border-2 border-slate-200 bg-white text-slate-400 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      removeParticipant(participant.participantId);
-                                    }}
-                                    aria-label={`${participant.name} 삭제`}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {participants.length === 0 && (
-                          <div className="flex min-h-[176px] flex-col items-center justify-center px-6 py-10 text-center">
-                            <div className="text-sm font-bold text-slate-900">
-                              아직 추가된 참가자가 없습니다
-                            </div>
-                            <div className="mt-1 text-xs font-mono text-slate-500">
-                              이름과 조건을 입력한 뒤 참가자를 추가하세요.
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="hidden md:block">
-                        <div className="overflow-x-auto">
-                          <div className="min-w-[620px] lg:min-w-[760px]">
-                            <div className="grid grid-cols-[48px_minmax(0,1.8fr)_64px_78px_72px_minmax(0,1.4fr)_40px] gap-3 border-b-2 border-slate-200 bg-slate-50 px-4 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 lg:grid-cols-[56px_minmax(0,2fr)_72px_88px_84px_minmax(0,1.5fr)_48px] lg:gap-4">
-                              <div className="text-center">ID</div>
-                              <div className="text-center">이름</div>
-                              <div className="text-center">성별</div>
-                              <div className="text-center">연령</div>
-                              <div className="text-center">등급</div>
-                              <div className="text-center">파트너</div>
-                              <div className="text-center">관리</div>
-                            </div>
-                            <div
-                              ref={participantListViewportRef}
-                              className="wizard-scroll max-h-[min(26rem,42vh)] bg-white"
-                            >
-                              {participants.map((participant, index) => {
-                                const partner = partnerLinks[participant.participantId]
-                                  ? participantById.get(
-                                      partnerLinks[participant.participantId]
-                                    ) ?? null
-                                  : null;
-                                const isPartnerSource =
-                                  partnerSelectionSourceId === participant.participantId;
-                                const isPartnerCandidate =
-                                  partnerSelectionSourceId !== null &&
-                                  partnerSelectionSourceId !== participant.participantId;
-
-                                return (
-                                  <div
-                                    key={participant.participantId}
-                                    ref={(element) => {
-                                      participantDesktopRowRefs.current[
-                                        participant.participantId
-                                      ] = element;
-                                    }}
-                                    onClick={() => {
-                                      if (isPartnerCandidate && !isAssignmentEditingLocked) {
-                                        assignPartner(participant.participantId);
-                                      }
-                                    }}
-                                    className={`grid grid-cols-[48px_minmax(0,1.8fr)_64px_78px_72px_minmax(0,1.4fr)_40px] items-center gap-3 px-4 py-3 transition-colors border-b-2 border-slate-100 lg:grid-cols-[56px_minmax(0,2fr)_72px_88px_84px_minmax(0,1.5fr)_48px] lg:gap-4 ${
-                                      isPartnerSource
-                                        ? "bg-violet-50"
-                                        : isPartnerCandidate
-                                          ? isAssignmentEditingLocked
-                                            ? "bg-white"
-                                            : "cursor-pointer bg-white hover:bg-violet-50"
-                                          : "hover:bg-slate-50"
-                                    }`}
-                                  >
-                                    <div className="text-center font-mono text-xs text-slate-400">
-                                      {String(index + 1).padStart(2, "0")}
-                                    </div>
-                                    <div className="text-sm font-bold text-slate-900">
-                                      {participant.name}
-                                    </div>
-                                    <div className="text-center font-mono text-xs text-slate-600">
-                                      {getGenderLabel(participant.gender)}
-                                    </div>
-                                    <div className="text-center font-mono text-xs text-slate-600">
-                                      {getAgeGroupLabel(participant.ageGroup)}
-                                    </div>
-                                    <div className="flex justify-center">
-                                      <span className="border-2 border-slate-200 bg-slate-100 px-2 py-1 text-xs font-mono font-bold uppercase text-slate-700">
-                                        {participant.level}
-                                      </span>
-                                    </div>
-                                    <div className="min-w-0">
-                                      {isPartnerSource ? (
-                                        <div className="flex items-center gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
-                                          <span className="truncate text-xs font-bold text-slate-900">
-                                            {participant.name}
-                                          </span>
-                                          <span className="shrink-0 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700">
-                                            파트너 선택 중
-                                          </span>
-                                        </div>
-                                      ) : isPartnerCandidate ? (
-                                        <div className="flex items-center justify-between gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
-                                          <span
-                                            className={`shrink-0 border px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase tracking-widest ${
-                                              partner
-                                                ? "border-amber-200 bg-amber-50 text-amber-700"
-                                                : "border-violet-200 bg-white text-violet-700"
-                                            }`}
-                                          >
-                                            {partner ? "교체" : "선택"}
-                                          </span>
-                                          <span className="min-w-0 truncate text-xs font-bold text-slate-900">
-                                            이 참가자와 연결
-                                          </span>
-                                        </div>
-                                      ) : partner ? (
-                                        <div className="flex items-center justify-between gap-2 border-2 border-violet-200 bg-violet-50 px-2 py-2">
-                                          <div className="min-w-0 truncate text-xs font-bold text-slate-900">
-                                            {partner.name}
-                                          </div>
-                                          <div className="flex shrink-0 items-center gap-1">
-                                            <button
-                                              type="button"
-                                              disabled={isAssignmentEditingLocked}
-                                              className="border border-violet-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-violet-700 hover:border-violet-400 hover:bg-violet-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                                              onClick={(event) => {
-                                                event.stopPropagation();
-                                                startPartnerSelection(
-                                                  participant.participantId
-                                                );
-                                              }}
-                                            >
-                                              변경
-                                            </button>
-                                            <button
-                                              type="button"
-                                              disabled={isAssignmentEditingLocked}
-                                              className="border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                                              onClick={(event) => {
-                                                event.stopPropagation();
-                                                clearPartner(participant.participantId);
-                                              }}
-                                            >
-                                              해제
-                                            </button>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          disabled={isAssignmentEditingLocked}
-                                          className="h-9 w-full rounded-none border-2 border-slate-200 bg-white px-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700"
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            startPartnerSelection(
-                                              participant.participantId
-                                            );
-                                          }}
-                                        >
-                                          파트너 지정
-                                        </Button>
-                                      )}
-                                    </div>
-                                    <div className="flex justify-end">
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        disabled={isAssignmentEditingLocked}
-                                        className="h-8 w-8 rounded-none text-slate-400 hover:bg-red-50 hover:text-red-500"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          removeParticipant(participant.participantId);
-                                        }}
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                              {participants.length === 0 && (
-                                <div className="flex min-h-[196px] flex-col items-center justify-center px-6 text-center">
-                                  <div className="text-sm font-bold text-slate-900">
-                                    아직 추가된 참가자가 없습니다
-                                  </div>
-                                  <div className="mt-1 text-xs font-mono text-slate-500">
-                                    참가자를 추가하면 이 목록에서 바로 확인할 수 있습니다.
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                      setNewParticipant((prev) => ({
+                        ...prev,
+                        ...(draft.name !== undefined ? { name: draft.name } : {}),
+                        ...(draft.gender !== undefined
+                          ? { gender: draft.gender as "M" | "F" }
+                          : {}),
+                        ...(draft.ageGroup !== undefined
+                          ? { ageGroup: draft.ageGroup }
+                          : {}),
+                        ...(draft.grade !== undefined
+                          ? { level: draft.grade as Grade }
+                          : {}),
+                      }));
+                    }}
+                    onAddParticipant={addParticipant}
+                    onStartPartnerSelection={(participantId) =>
+                      startPartnerSelection(Number(participantId))
+                    }
+                    onAssignPartner={(participantId) => assignPartner(Number(participantId))}
+                    onClearPartner={(participantId) => clearPartner(Number(participantId))}
+                    onRemoveParticipant={(participantId) =>
+                      removeParticipant(Number(participantId))
+                    }
+                  />
                 </div>
               </motion.div>
             )}
