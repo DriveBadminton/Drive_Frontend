@@ -446,18 +446,12 @@ export async function getPublicGameByShareCode(
 export async function updateGame(
   gameId: string,
   updates: UpdateGameRequest
-): Promise<boolean> {
-  try {
-    await apiRequest(`/free-games/${gameId}`, {
-      method: "PATCH",
-      auth: true,
-      body: updates,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
+): Promise<void> {
+  await apiRequest(`/free-games/${gameId}`, {
+    method: "PATCH",
+    auth: true,
+    body: updates,
+  });
 }
 
 export async function addFreeGameParticipant(

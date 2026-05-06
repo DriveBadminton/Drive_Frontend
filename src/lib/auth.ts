@@ -33,6 +33,7 @@ interface CreateIdentitySessionResponse {
 }
 
 export interface SessionUser {
+  accountId?: string | null;
   status: UserStatus;
   nickname?: string | null;
   profileImageUrl?: string | null;

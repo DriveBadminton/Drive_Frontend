@@ -24,8 +24,9 @@ import {
   type CourtAssignmentWorkbenchParticipantSummaryGroup,
   type CourtAssignmentWorkbenchRound,
 } from "@/components/court-manager/CourtAssignmentWorkbench";
+import { ParticipantManagementPanel } from "@/components/court-manager/ParticipantManagementPanel";
 import { useAuth } from "@/hooks/useAuth";
-import { getUserFacingErrorMessage } from "@/lib/api";
+import { getUserFacingErrorMessage, isApiError } from "@/lib/api";
 import { formatGradeLabel, toBackendGrade } from "@/lib/grade";
 import {
   type AgeGroup,
@@ -140,6 +141,26 @@ class DetailAssignmentPreviewContractError extends Error {
     super(message);
     this.name = "DetailAssignmentPreviewContractError";
   }
+}
+
+function getSettingsSaveErrorMessage(error: unknown) {
+  if (isApiError(error)) {
+    if (error.status === 401) {
+      return "로그인 상태가 만료되었습니다. 다시 로그인 후 시도해주세요.";
+    }
+
+    if (error.status === 403) {
+      return "운영자만 기본 정보를 수정할 수 있습니다.";
+    }
+
+    if (error.status === 409) {
+      return "현재 게임 상태에서는 일부 기본 정보를 수정할 수 없습니다.";
+    }
+
+    return getUserFacingErrorMessage(error, "");
+  }
+
+  return "서버에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.";
 }
 
 function toResultLabel(result: MatchResult) {
@@ -758,16 +779,16 @@ const OperationCourtTile = ({
 };
 
 function getOperationCourtGridClassName(matchCount: number) {
-  const baseClassName = "grid min-w-0 grid-cols-1 gap-3";
+  const baseClassName = "grid min-w-0 justify-center gap-3";
 
   if (matchCount <= 1) {
-    return `${baseClassName} lg:grid-cols-[minmax(0,20rem)] lg:justify-center xl:grid-cols-[minmax(0,21rem)]`;
+    return `${baseClassName} grid-cols-[minmax(0,22rem)] sm:grid-cols-[minmax(0,24rem)] lg:grid-cols-[minmax(0,20rem)] xl:grid-cols-[minmax(0,21rem)]`;
   }
 
-  const mobileClassName = `${baseClassName} min-[390px]:grid-cols-2`;
+  const mobileClassName = `${baseClassName} grid-cols-1 min-[390px]:grid-cols-[repeat(2,minmax(0,10.75rem))] sm:grid-cols-[repeat(2,minmax(0,16rem))] md:grid-cols-[repeat(2,minmax(0,18rem))]`;
 
   if (matchCount === 2) {
-    return `${mobileClassName} lg:grid-cols-[repeat(2,minmax(0,20rem))] lg:justify-center xl:grid-cols-[repeat(2,minmax(0,21rem))]`;
+    return `${mobileClassName} lg:grid-cols-[repeat(2,minmax(0,20rem))] xl:grid-cols-[repeat(2,minmax(0,21rem))]`;
   }
 
   if (matchCount === 3) {
@@ -779,11 +800,11 @@ function getOperationCourtGridClassName(matchCount: number) {
 
 function getOperationCourtClusterClassName(matchCount: number) {
   if (matchCount <= 1) {
-    return "space-y-3 lg:mx-auto lg:max-w-[20rem] xl:max-w-[21rem]";
+    return "mx-auto max-w-[22rem] space-y-3 sm:max-w-[24rem] lg:max-w-[20rem] xl:max-w-[21rem]";
   }
 
   if (matchCount === 2) {
-    return "space-y-3 lg:mx-auto lg:max-w-[41.5rem] xl:max-w-[43.5rem]";
+    return "mx-auto max-w-[22.25rem] space-y-3 sm:max-w-[33rem] md:max-w-[37.5rem] lg:max-w-[41.5rem] xl:max-w-[43.5rem]";
   }
 
   return "space-y-3";
@@ -960,7 +981,7 @@ const CompactScheduleRound = ({
 export default function ManagerGameDetailPage() {
   const params = useParams();
   const gameId = typeof params?.id === "string" ? params.id : "";
-  const { isLoading, isLoggedIn } = useAuth();
+  const { isLoading, isLoggedIn, user } = useAuth();
   const [game, setGame] = useState<Game | null>(null);
   const [pageError, setPageError] = useState("");
   const [isPageLoading, setIsPageLoading] = useState(true);
@@ -1085,6 +1106,19 @@ export default function ManagerGameDetailPage() {
     () => (game ? buildParticipantViews(game, scheduleDraft) : []),
     [game, scheduleDraft]
   );
+  const showParticipantWinLoss = game
+    ? shouldShowWinLoss(game.matchRecordMode)
+    : false;
+  const participantManagementItems = participantViews.map((participant) => ({
+    id: participant.id,
+    name: participant.name,
+    genderLabel: getGenderLabel(participant.gender),
+    ageLabel: `${participant.ageGroup}대`,
+    gradeLabel: formatGradeLabel(participant.grade),
+    gamesLabel: formatMatchCountLabel(participant.gamesAssigned),
+    winLossLabel: showParticipantWinLoss ? formatWinLossLabel(participant) : undefined,
+    isActive: participant.status === "playing",
+  }));
   const persistedMaxRoundNumber = game ? getMaxRoundNumber(game.rounds) : 0;
   const canEditScheduleStructure = game?.status === "NOT_STARTED";
   const scheduleWorkbenchParticipantSummaryGroups: CourtAssignmentWorkbenchParticipantSummaryGroup[] =
@@ -1144,7 +1178,12 @@ export default function ManagerGameDetailPage() {
     pendingMatches[0]?.roundNumber ??
     currentOperationalRound?.roundNumber ??
     null;
-  const isOperator = !!game;
+  const currentAccountId = user?.accountId ?? null;
+  const isOperator = Boolean(
+    game &&
+      isLoggedIn &&
+      (currentAccountId ? currentAccountId === game.createdBy : true)
+  );
   const isEditingSettings = editMode === "settings";
   const isEditingSchedule = editMode === "schedule";
   const isBusy = operationSubmitting || isAiPreviewSubmitting || isParticipantSubmitting;
@@ -1181,7 +1220,7 @@ export default function ManagerGameDetailPage() {
   };
 
   const openSettingsEditor = () => {
-    if (!game) {
+    if (!game || !isOperator) {
       return;
     }
     setSettingsError("");
@@ -1471,6 +1510,11 @@ export default function ManagerGameDetailPage() {
       return;
     }
 
+    if (!isOperator) {
+      setSettingsError("운영자만 기본 정보를 수정할 수 있습니다.");
+      return;
+    }
+
     const trimmedTitle = settingsDraft.title.trim();
     if (!trimmedTitle) {
       setSettingsError("게임 이름을 입력해주세요.");
@@ -1479,20 +1523,21 @@ export default function ManagerGameDetailPage() {
 
     setOperationSubmitting(true);
     setSettingsError("");
-    const success = await updateGame(game.id, {
-      title: trimmedTitle,
-      matchRecordMode: isRecordModeLocked
-        ? game.matchRecordMode
-        : settingsDraft.matchRecordMode,
-      gradeType: settingsDraft.gradeType,
-    });
-    if (!success) {
-      setSettingsError("게임 이름 저장에 실패했습니다.");
-    } else {
+    try {
+      await updateGame(game.id, {
+        title: trimmedTitle,
+        matchRecordMode: isRecordModeLocked
+          ? game.matchRecordMode
+          : settingsDraft.matchRecordMode,
+        gradeType: settingsDraft.gradeType,
+      });
       setEditMode(null);
       await reloadGame();
+    } catch (error) {
+      setSettingsError(getSettingsSaveErrorMessage(error));
+    } finally {
+      setOperationSubmitting(false);
     }
-    setOperationSubmitting(false);
   };
 
   const handleSaveSchedule = async () => {
@@ -1520,12 +1565,12 @@ export default function ManagerGameDetailPage() {
     setOperationSubmitting(false);
   };
 
-  const handleAddParticipant = async () => {
+  const handleAddParticipant = async (nameOverride?: string) => {
     if (!game || !canAddParticipant || isBusy) {
       return;
     }
 
-    const trimmedName = participantDraft.name.trim();
+    const trimmedName = (nameOverride ?? participantDraft.name).trim();
     if (!trimmedName) {
       setParticipantError("참가자 이름을 입력해주세요.");
       return;
@@ -1759,9 +1804,6 @@ export default function ManagerGameDetailPage() {
       ? `${pendingMatches.length}코트 입장 대기`
       : "입장 대상이 없습니다."
     : "";
-  const showParticipantWinLoss = game
-    ? shouldShowWinLoss(game.matchRecordMode)
-    : false;
   const renderParticipantSummaryRow = (
     participant: ParticipantView,
     options: { includeGrade?: boolean; modal?: boolean } = {}
@@ -2106,18 +2148,20 @@ export default function ManagerGameDetailPage() {
               </div>
             </div>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-11 shrink-0 rounded-none border-2 border-zinc-700 bg-zinc-900 px-3 text-[10px] font-mono font-bold tracking-widest whitespace-nowrap text-zinc-100 shadow-none hover:bg-zinc-800"
-            onClick={openSettingsEditor}
-            disabled={isBusy}
-            aria-label="기본 정보 수정"
-          >
-            <PencilLine className="h-3.5 w-3.5 sm:mr-2" />
-            <span className="hidden sm:inline">수정</span>
-          </Button>
+          {isOperator ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-11 shrink-0 rounded-none border-2 border-zinc-700 bg-zinc-900 px-3 text-[10px] font-mono font-bold tracking-widest whitespace-nowrap text-zinc-100 shadow-none hover:bg-zinc-800"
+              onClick={openSettingsEditor}
+              disabled={isBusy}
+              aria-label="기본 정보 수정"
+            >
+              <PencilLine className="h-3.5 w-3.5 sm:mr-2" />
+              <span className="hidden sm:inline">수정</span>
+            </Button>
+          ) : null}
           <Button
             size="sm"
             className="h-11 shrink-0 rounded-none border-2 border-zinc-700 bg-zinc-900 px-3 text-[10px] font-mono font-bold tracking-widest whitespace-nowrap text-zinc-100 shadow-none hover:bg-zinc-800"
@@ -2551,16 +2595,16 @@ export default function ManagerGameDetailPage() {
 
       {isParticipantManagerOpen ? (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto overscroll-contain bg-zinc-950/50 px-4 py-8"
+          className="fixed inset-0 z-40 flex items-end justify-center overflow-hidden bg-zinc-950/60 px-0 sm:items-center sm:px-4 sm:py-6"
           onClick={() => setIsParticipantManagerOpen(false)}
         >
           <div
             role="dialog"
             aria-modal="true"
-            className="flex max-h-[min(88vh,44rem)] w-full max-w-3xl flex-col overflow-hidden rounded-none border-2 border-slate-900 bg-white shadow-[6px_6px_0px_0px_rgba(15,23,42,1)]"
+            className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-none border-x-2 border-t-2 border-slate-900 bg-white shadow-[0_-8px_24px_rgba(15,23,42,0.18)] sm:max-h-[min(88vh,44rem)] sm:max-w-2xl sm:border-2 sm:shadow-[6px_6px_0px_0px_rgba(15,23,42,1)] lg:max-w-4xl"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4 border-b-2 border-slate-900 px-5 py-4">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b-2 border-slate-900 px-4 py-3 sm:px-5 sm:py-4">
               <div>
                 <h3 className="font-display text-xl font-black tracking-tight text-slate-900">
                   참가자 관리
@@ -2581,123 +2625,41 @@ export default function ManagerGameDetailPage() {
               </Button>
             </div>
 
-            <div className="grid min-h-0 flex-1 gap-0 overflow-hidden md:grid-cols-[minmax(0,1fr)_16rem]">
-              <div className="min-h-0 overflow-y-auto border-b-2 border-zinc-100 md:border-r-2 md:border-b-0">
-                <div className="flex items-center justify-between bg-zinc-50 px-4 py-3">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
-                    현재 명단
-                  </span>
-                  <span className="text-xs font-mono font-bold text-zinc-500">
-                    {participantViews.length}명
-                  </span>
-                </div>
-                <div className="divide-y divide-zinc-100">
-                  {participantViews.map((participant) =>
-                    renderParticipantSummaryRow(participant, {
-                      includeGrade: true,
-                      modal: true,
-                    })
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-white p-4">
-                <div className="mb-3">
-                  <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-500">
-                    참가자 추가
-                  </div>
-                  {!canAddParticipant ? (
-                    <p className="mt-1 text-xs font-bold text-zinc-400">
-                      완료된 자유게임에는 참가자를 추가할 수 없습니다.
-                    </p>
-                  ) : null}
-                </div>
-
-                <div className="grid gap-2">
-                  <input
-                    value={participantDraft.name}
-                    onChange={(event) =>
-                      setParticipantDraft((prev) => ({
-                        ...prev,
-                        name: event.target.value,
-                      }))
-                    }
-                    onKeyDown={(event) => {
-                      if (event.nativeEvent.isComposing) {
-                        return;
-                      }
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void handleAddParticipant();
-                      }
-                    }}
-                    disabled={!canAddParticipant || isBusy}
-                    className="h-11 min-w-0 rounded-none border-2 border-slate-200 bg-slate-50 px-3 text-sm font-bold text-zinc-900 placeholder:text-zinc-400 focus:border-slate-900 focus:bg-white focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-400"
-                    placeholder="이름"
-                  />
-                  <div className="grid grid-cols-3 gap-2">
-                    <Select
-                      variant="brutalist"
-                      size="compact"
-                      value={participantDraft.gender}
-                      options={PARTICIPANT_GENDER_OPTIONS}
-                      disabled={!canAddParticipant || isBusy}
-                      onChange={(value) =>
-                        setParticipantDraft((prev) => ({
-                          ...prev,
-                          gender: value as Gender,
-                        }))
-                      }
-                    />
-                    <Select
-                      variant="brutalist"
-                      size="compact"
-                      value={String(participantDraft.age)}
-                      options={PARTICIPANT_AGE_SELECT_OPTIONS}
-                      disabled={!canAddParticipant || isBusy}
-                      onChange={(value) =>
-                        setParticipantDraft((prev) => ({
-                          ...prev,
-                          age: Number(value) as AgeGroup,
-                        }))
-                      }
-                    />
-                    <Select
-                      variant="brutalist"
-                      size="compact"
-                      value={participantDraft.grade}
-                      options={PARTICIPANT_GRADE_SELECT_OPTIONS}
-                      disabled={!canAddParticipant || isBusy}
-                      onChange={(value) =>
-                        setParticipantDraft((prev) => ({
-                          ...prev,
-                          grade: value as Grade,
-                        }))
-                      }
-                    />
-                  </div>
-
-                  <Button
-                    type="button"
-                    className="h-11 rounded-none bg-zinc-950 text-xs font-black tracking-widest text-white hover:bg-zinc-800"
-                    onClick={() => void handleAddParticipant()}
-                    disabled={!canAddParticipant || isBusy}
-                  >
-                    {isParticipantSubmitting ? (
-                      <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <UserPlus className="mr-2 h-4 w-4" />
-                    )}
-                    참가자 추가
-                  </Button>
-                </div>
-
-                {participantError ? (
-                  <div className="mt-3 border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
-                    {participantError}
-                  </div>
-                ) : null}
-              </div>
+            <div className="min-h-0 flex-1 overflow-hidden p-4">
+              <ParticipantManagementPanel
+                participants={participantManagementItems}
+                draft={{
+                  name: participantDraft.name,
+                  gender: participantDraft.gender,
+                  ageGroup: String(participantDraft.age),
+                  grade: participantDraft.grade,
+                }}
+                genderOptions={PARTICIPANT_GENDER_OPTIONS}
+                ageOptions={PARTICIPANT_AGE_SELECT_OPTIONS}
+                gradeOptions={PARTICIPANT_GRADE_SELECT_OPTIONS}
+                disabled={!canAddParticipant || isBusy}
+                isSubmitting={isParticipantSubmitting}
+                errorText={participantError || undefined}
+                addDisabledMessage={
+                  !canAddParticipant
+                    ? "완료된 자유게임에는 참가자를 추가할 수 없습니다."
+                    : undefined
+                }
+                listClassName="min-h-0"
+                onDraftChange={(draft) => {
+                  setParticipantError("");
+                  setParticipantDraft((prev) => ({
+                    ...prev,
+                    ...(draft.name !== undefined ? { name: draft.name } : {}),
+                    ...(draft.gender !== undefined ? { gender: draft.gender as Gender } : {}),
+                    ...(draft.ageGroup !== undefined
+                      ? { age: Number(draft.ageGroup) as AgeGroup }
+                      : {}),
+                    ...(draft.grade !== undefined ? { grade: draft.grade as Grade } : {}),
+                  }));
+                }}
+                onAddParticipant={(nameOverride) => void handleAddParticipant(nameOverride)}
+              />
             </div>
           </div>
         </div>

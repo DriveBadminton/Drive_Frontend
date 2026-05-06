@@ -26,6 +26,19 @@ export class ApiError extends Error {
   }
 }
 
+function looksLikeApiError(error: unknown): error is ApiError {
+  if (error instanceof ApiError) {
+    return true;
+  }
+
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof (error as { status?: unknown }).status === "number"
+  );
+}
+
 function getMappedProblemMessage(
   problem: ProblemDetail | undefined,
   status: number
@@ -46,7 +59,7 @@ function getMappedProblemMessage(
 }
 
 export function getUserFacingErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) {
+  if (looksLikeApiError(error)) {
     return (
       getMappedProblemMessage(error.problem, error.status) ||
       fallback ||
@@ -270,7 +283,7 @@ export async function apiRequest<T = void>(
 }
 
 export function isApiError(error: unknown): error is ApiError {
-  return error instanceof ApiError;
+  return looksLikeApiError(error);
 }
 
 export { API_URL, AUTH_URL };
