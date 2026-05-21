@@ -7,10 +7,10 @@ function normalizeHeaderHost(value?: string | null) {
   return (value || "").split(",")[0].trim().split(":")[0];
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const authHost = new URL(AUTH_URL).host;
   const publicHost = normalizeHeaderHost(
-    request.headers.get("x-rallyon-public-host"),
+    request.headers.get("x-forwarded-host"),
   );
 
   if (publicHost === authHost) {

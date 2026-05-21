@@ -6,9 +6,9 @@ export default function ManagerLayout({
   children: React.ReactNode;
 }) {
   return (
-    <PageShell disableFooter mainClassName="bg-[#F8F9FA]">
-      <div className="flex min-h-screen flex-col bg-[#F8F9FA]">
-        <main className="flex-1">{children}</main>
+    <PageShell disableFooter mainClassName="min-h-0 flex-1 bg-[#F8F9FA]">
+      <div className="flex min-h-0 flex-1 flex-col bg-[#F8F9FA]">
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       </div>
     </PageShell>
   );

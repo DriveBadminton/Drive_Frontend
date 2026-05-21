@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -12,7 +12,13 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/logo";
-import { AuthProvider, DummyLoginOption } from "@/lib/auth";
+import {
+  AuthProvider,
+  AuthScreen,
+  DummyLoginOption,
+  createIdentitySession,
+} from "@/lib/auth";
+import { getUserFacingErrorMessage } from "@/lib/api";
 
 const SERVICE_HIGHLIGHTS = [
   {
@@ -34,10 +40,14 @@ const SERVICE_HIGHLIGHTS = [
 
 function SocialLoginButton({
   provider,
-  href,
+  onClick,
+  disabled,
+  pending,
 }: {
   provider: Exclude<AuthProvider, "DUMMY">;
-  href: string;
+  onClick: () => void;
+  disabled: boolean;
+  pending: boolean;
 }) {
   const config = {
     KAKAO: {
@@ -67,22 +77,28 @@ function SocialLoginButton({
   }[provider];
 
   return (
-    <a
-      href={href}
-      className={`flex h-12 w-full items-center justify-center rounded-xl px-4 font-medium transition-[background-color,border-color,color,opacity,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${config.buttonClassName}`}
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex h-12 w-full items-center justify-center rounded-xl px-4 font-medium transition-[background-color,border-color,color,opacity,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70 ${config.buttonClassName}`}
     >
       <span className="inline-flex items-center justify-center gap-3">
-        <Image
-          src={config.iconSrc}
-          alt=""
-          aria-hidden="true"
-          width={config.iconSize}
-          height={config.iconSize}
-          className={config.iconClassName}
-        />
-        <span className="text-base">{config.label}</span>
+        {pending ? (
+          <LoaderCircle className="h-[18px] w-[18px] animate-spin" />
+        ) : (
+          <Image
+            src={config.iconSrc}
+            alt=""
+            aria-hidden="true"
+            width={config.iconSize}
+            height={config.iconSize}
+            className={config.iconClassName}
+          />
+        )}
+        <span className="text-base">{pending ? "로그인 준비 중..." : config.label}</span>
       </span>
-    </a>
+    </button>
   );
 }
 
@@ -142,6 +158,8 @@ export function AuthPageScene({
   errorMessage,
   form,
   footer,
+  screen,
+  returnTo,
   socialLabel = "Social Login",
   allowedProviders,
   dummyOptions,
@@ -152,22 +170,55 @@ export function AuthPageScene({
   errorMessage?: string | null;
   form: ReactNode;
   footer?: ReactNode;
+  screen: AuthScreen;
+  returnTo: string;
   socialLabel?: string;
   allowedProviders: AuthProvider[];
   dummyOptions: DummyLoginOption[];
 }) {
+  const [socialStartError, setSocialStartError] = useState<string | null>(null);
+  const [pendingProvider, setPendingProvider] = useState<
+    Exclude<AuthProvider, "DUMMY"> | null
+  >(null);
   const visibleProviders = allowedProviders.filter(
     (provider): provider is Exclude<AuthProvider, "DUMMY"> => provider !== "DUMMY"
   );
+  const visibleErrorMessage = socialStartError ?? errorMessage;
+
+  async function handleSocialLogin(provider: Exclude<AuthProvider, "DUMMY">) {
+    if (pendingProvider !== null) {
+      return;
+    }
+
+    setSocialStartError(null);
+    setPendingProvider(provider);
+
+    try {
+      const nextUrl = await createIdentitySession({
+        provider,
+        screen,
+        returnTo,
+      });
+      window.location.assign(nextUrl);
+    } catch (error) {
+      setSocialStartError(
+        getUserFacingErrorMessage(
+          error,
+          "소셜 로그인을 시작하지 못했어요. 다시 시도해주세요."
+        )
+      );
+      setPendingProvider(null);
+    }
+  }
 
   return (
     <div className="relative min-h-[100dvh] overflow-hidden bg-zinc-950 text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.24),transparent_38%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_24%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:42px_42px] opacity-20" />
 
-      <div className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-6xl items-center px-4 py-4 md:px-6">
-        <div className="grid w-full gap-4 lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)_auto]">
-          <section className="border-2 border-zinc-800 bg-zinc-950/88 p-5 shadow-[8px_8px_0px_0px_rgba(16,185,129,0.12)] sm:p-6 lg:row-start-1 lg:h-full lg:p-7">
+      <div className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-6xl items-start px-4 py-3 sm:px-5 sm:py-4 md:px-6 lg:items-center lg:py-6">
+        <div className="grid w-full gap-3 sm:gap-4 lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)_auto]">
+          <section className="hidden border-2 border-zinc-800 bg-zinc-950/88 p-5 shadow-[8px_8px_0px_0px_rgba(16,185,129,0.12)] sm:p-6 lg:row-start-1 lg:block lg:h-full lg:p-7">
             <div className="flex h-full flex-col">
               <Logo variant="dark" className="h-8" />
 
@@ -211,7 +262,7 @@ export function AuthPageScene({
           </section>
 
           <section className="border-2 border-zinc-900 bg-white text-zinc-950 shadow-[8px_8px_0px_0px_rgba(16,185,129,0.9)] lg:row-start-1 lg:h-full lg:overflow-y-auto">
-            <div className="flex h-full min-h-0 flex-col justify-center p-5 sm:p-6 lg:p-7">
+            <div className="flex h-full min-h-0 flex-col justify-start p-4 sm:p-5 lg:justify-center lg:p-7">
               <div className="lg:hidden">
                 <Logo className="h-7" variant="light" />
               </div>
@@ -226,9 +277,9 @@ export function AuthPageScene({
                 {description}
               </p>
 
-              {errorMessage ? (
+              {visibleErrorMessage ? (
                 <div className="mt-4 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {errorMessage}
+                  {visibleErrorMessage}
                 </div>
               ) : null}
 
@@ -251,7 +302,9 @@ export function AuthPageScene({
                       <SocialLoginButton
                         key={provider}
                         provider={provider}
-                        href={`/identity/oauth/${provider}`}
+                        onClick={() => void handleSocialLogin(provider)}
+                        disabled={pendingProvider !== null}
+                        pending={pendingProvider === provider}
                       />
                     ))}
                   </div>

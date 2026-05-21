@@ -1,16 +1,17 @@
 "use client";
 
 import { apiRequest, isApiError } from "./api";
-import { UiGameGrade, toBackendGrade, toUiGameGrade } from "./grade";
+import { type BackendGrade, type UiGameGrade, toBackendGrade, toUiGameGrade } from "./grade";
 
 export type Gender = "MALE" | "FEMALE";
 export type Grade = UiGameGrade;
 export type AgeGroup = 10 | 20 | 30 | 40 | 50 | 60 | 70;
 export type GradeType = "REGIONAL" | "NATIONAL";
-export type MatchRecordMode = "RESULT" | "STATUS_ONLY";
+export type MatchRecordMode = "STATUS_ONLY" | "WINNER_ONLY" | "SCORE";
 export type GameStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
 export type MatchStatus = GameStatus | "NULL";
 export type MatchResult = "TEAM_A_WIN" | "TEAM_B_WIN" | "DRAW" | null;
+export type MatchWinnerTeam = "TEAM_A" | "TEAM_B";
 
 export interface Participant {
   id: string;
@@ -22,8 +23,8 @@ export interface Participant {
   ageGroup: AgeGroup;
   assignedMatchCount: number;
   completedMatchCount: number;
-  winCount: number;
-  lossCount: number;
+  winCount: number | null;
+  lossCount: number | null;
 }
 
 export interface CourtMatch {
@@ -33,6 +34,8 @@ export interface CourtMatch {
   teamBIds: [string | null, string | null];
   status: MatchStatus;
   result: MatchResult;
+  teamAScore: number | null;
+  teamBScore: number | null;
   isActive: boolean;
 }
 
@@ -70,7 +73,7 @@ export interface PublicGameSummary {
 }
 
 export interface CreateGameParticipant {
-  clientId: string;
+  participantId: number;
   accountId?: string;
   originalName: string;
   gender: Gender;
@@ -82,7 +85,7 @@ export interface CreateGameRound {
   roundNumber: number;
   courts: Array<{
     courtNumber: number;
-    slots: [string | null, string | null, string | null, string | null];
+    slots: [number | null, number | null, number | null, number | null];
   }>;
 }
 
@@ -117,6 +120,95 @@ export interface ScheduleDraftRound {
   }>;
 }
 
+export interface CompleteGameMatchRequest {
+  winnerTeam?: MatchWinnerTeam;
+  teamAScore?: number;
+  teamBScore?: number;
+}
+
+export interface AddGameParticipantRequest {
+  accountId?: string | null;
+  name: string;
+  gender: Gender;
+  grade: Grade;
+  age: AgeGroup;
+}
+
+export type AssignmentPreviewPartnerPolicy =
+  | "PREFER_PARTNERS"
+  | "IGNORE_PARTNERS";
+export type AssignmentPreviewExistingAssignmentPolicy =
+  | "FILL_EMPTY_SLOTS"
+  | "REASSIGN_ALL";
+export type AssignmentPreviewSlot = [
+  number | null,
+  number | null,
+  number | null,
+  number | null,
+];
+
+export interface AssignmentPreviewCourt {
+  courtNumber: number;
+  slots: AssignmentPreviewSlot;
+}
+
+export interface AssignmentPreviewRound {
+  roundNumber: number;
+  courts: AssignmentPreviewCourt[];
+}
+
+export interface CreateGameAssignmentPreviewRequest {
+  participants: Array<{
+    participantId: number;
+    gender: Gender;
+    ageGroup: AgeGroup;
+    grade: BackendGrade;
+    gamesAssigned: number;
+  }>;
+  rounds: AssignmentPreviewRound[];
+  partnerPairs: Array<{
+    participantId1: number;
+    participantId2: number;
+  }>;
+  preferences: {
+    partnerPolicy: AssignmentPreviewPartnerPolicy;
+    existingAssignmentPolicy: AssignmentPreviewExistingAssignmentPolicy;
+  };
+}
+
+export interface CreateGameAssignmentPreviewResponse {
+  rounds: AssignmentPreviewRound[];
+  warnings: Array<{
+    code: string;
+    message: string;
+  }>;
+}
+
+export type AssignmentPreviewJobStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED";
+
+export interface CreateGameAssignmentPreviewJobResponse {
+  jobId: string;
+  status: "QUEUED";
+  pollAfterMs: number;
+}
+
+export interface GetGameAssignmentPreviewJobResponse {
+  jobId: string;
+  status: AssignmentPreviewJobStatus;
+  preview: CreateGameAssignmentPreviewResponse | null;
+  failure: {
+    code: string;
+    message: string;
+  } | null;
+  submittedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
 interface CreateFreeGameResponse {
   gameId: string;
 }
@@ -144,8 +236,8 @@ interface FreeGameParticipantResponse {
   ageGroup: number;
   assignedMatchCount: number;
   completedMatchCount: number;
-  winCount: number;
-  lossCount: number;
+  winCount: number | null;
+  lossCount: number | null;
 }
 
 interface FreeGameParticipantsResponse {
@@ -160,6 +252,8 @@ interface FreeGameMatchResponse {
   teamBIds: Array<string | null>;
   matchStatus: MatchStatus;
   matchResult: Exclude<MatchResult, null> | "NULL";
+  teamAScore?: number | null;
+  teamBScore?: number | null;
   isActive: boolean;
 }
 
@@ -214,6 +308,8 @@ function mapRounds(rounds: FreeGameRoundResponse[]): GameRound[] {
             match.matchResult && match.matchResult !== "NULL"
               ? match.matchResult
               : null,
+          teamAScore: match.teamAScore ?? null,
+          teamBScore: match.teamBScore ?? null,
           isActive: match.isActive,
         })),
     }));
@@ -257,6 +353,31 @@ export async function createFreeGame(
   });
 
   return { gameId: response.gameId };
+}
+
+export async function createFreeGameAssignmentPreview(
+  request: CreateGameAssignmentPreviewRequest
+): Promise<CreateGameAssignmentPreviewJobResponse> {
+  return apiRequest<CreateGameAssignmentPreviewJobResponse>(
+    "/free-games/assignment-previews",
+    {
+      method: "POST",
+      auth: true,
+      body: request,
+    }
+  );
+}
+
+export async function getFreeGameAssignmentPreviewJob(
+  jobId: string
+): Promise<GetGameAssignmentPreviewJobResponse> {
+  return apiRequest<GetGameAssignmentPreviewJobResponse>(
+    `/free-games/assignment-previews/${jobId}`,
+    {
+      method: "GET",
+      auth: true,
+    }
+  );
 }
 
 export async function getGameById(gameId: string): Promise<Game | null> {
@@ -325,12 +446,26 @@ export async function getPublicGameByShareCode(
 export async function updateGame(
   gameId: string,
   updates: UpdateGameRequest
+): Promise<void> {
+  await apiRequest(`/free-games/${gameId}`, {
+    method: "PATCH",
+    auth: true,
+    body: updates,
+  });
+}
+
+export async function addFreeGameParticipant(
+  gameId: string,
+  request: AddGameParticipantRequest
 ): Promise<boolean> {
   try {
-    await apiRequest(`/free-games/${gameId}`, {
-      method: "PATCH",
+    await apiRequest(`/free-games/${gameId}/participants`, {
+      method: "POST",
       auth: true,
-      body: updates,
+      body: {
+        ...request,
+        grade: toBackendGrade(request.grade),
+      },
     });
 
     return true;
@@ -370,6 +505,64 @@ export async function updateGameSchedule(
   }
 }
 
+export async function startFreeGame(gameId: string): Promise<boolean> {
+  try {
+    await apiRequest(`/free-games/${gameId}/start`, {
+      method: "POST",
+      auth: true,
+      parseAs: "void",
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function startFreeGameMatch(
+  gameId: string,
+  roundNumber: number,
+  courtNumber: number
+): Promise<boolean> {
+  try {
+    await apiRequest(
+      `/free-games/${gameId}/rounds/${roundNumber}/matches/${courtNumber}/start`,
+      {
+        method: "POST",
+        auth: true,
+        parseAs: "void",
+      }
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function completeFreeGameMatch(
+  gameId: string,
+  roundNumber: number,
+  courtNumber: number,
+  request: CompleteGameMatchRequest
+): Promise<boolean> {
+  try {
+    await apiRequest(
+      `/free-games/${gameId}/rounds/${roundNumber}/matches/${courtNumber}/complete`,
+      {
+        method: "POST",
+        auth: true,
+        parseAs: "void",
+        body: request,
+      }
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function getGameStatusLabel(status: GameStatus): string {
   switch (status) {
     case "NOT_STARTED":
@@ -384,7 +577,16 @@ export function getGameStatusLabel(status: GameStatus): string {
 }
 
 export function getMatchRecordModeLabel(mode: MatchRecordMode) {
-  return mode === "RESULT" ? "결과 기록" : "상태만 기록";
+  switch (mode) {
+    case "STATUS_ONLY":
+      return "진행만";
+    case "WINNER_ONLY":
+      return "승자 기록";
+    case "SCORE":
+      return "점수 기록";
+    default:
+      return "-";
+  }
 }
 
 export function getGradeTypeLabel(gradeType: GradeType) {

@@ -15,6 +15,7 @@ import PageShell from "@/components/layout/PageShell";
 import { Button } from "@/components/ui/button";
 import { TagChip } from "@/components/ui/tag-chip";
 import { AuthProvider, UserProfile, getMyProfile } from "@/lib/auth";
+import { getUserFacingErrorMessage } from "@/lib/api";
 import { formatGradeLabel } from "@/lib/grade";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -98,9 +99,7 @@ export default function ProfilePage() {
           setProfile(nextProfile);
         } catch (error) {
           setProfileError(
-            error instanceof Error
-              ? error.message
-              : "프로필 정보를 불러오지 못했습니다."
+            getUserFacingErrorMessage(error, "프로필 정보를 불러오지 못했습니다.")
           );
           setProfile(null);
         } finally {

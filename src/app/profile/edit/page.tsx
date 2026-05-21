@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, MapPin, PencilLine } from "lucide-react";
 import PageShell from "@/components/layout/PageShell";
+import { getUserFacingErrorMessage } from "@/lib/api";
 import {
   District,
   Gender,
@@ -133,9 +134,7 @@ function ProfileEditContent() {
           });
         } catch (error) {
           setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "프로필 정보를 불러오지 못했습니다."
+            getUserFacingErrorMessage(error, "프로필 정보를 불러오지 못했습니다.")
           );
         } finally {
           setIsBootstrapping(false);

@@ -1,7 +1,10 @@
 "use client";
 
+import { SCHEDULED_AT_VALIDATION_MESSAGE } from "./scheduled-at";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.rallyon.test";
 const AUTH_URL = process.env.NEXT_PUBLIC_AUTH_URL || "https://auth.rallyon.test";
+export const AUTH_EXPIRED_EVENT = "rallyon:auth-expired";
 
 export interface ProblemDetail {
   type?: string;
@@ -20,6 +23,76 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
     this.problem = problem;
+  }
+}
+
+function looksLikeApiError(error: unknown): error is ApiError {
+  if (error instanceof ApiError) {
+    return true;
+  }
+
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof (error as { status?: unknown }).status === "number"
+  );
+}
+
+function getMappedProblemMessage(
+  problem: ProblemDetail | undefined,
+  status: number
+): string | null {
+  if (!problem || ![400, 422].includes(status)) {
+    return null;
+  }
+
+  const serializedProblem = `${problem.type ?? ""} ${problem.title ?? ""} ${problem.detail ?? ""}`
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+  if (serializedProblem.includes("scheduledat")) {
+    return SCHEDULED_AT_VALIDATION_MESSAGE;
+  }
+
+  return null;
+}
+
+export function getUserFacingErrorMessage(error: unknown, fallback: string) {
+  if (looksLikeApiError(error)) {
+    return (
+      getMappedProblemMessage(error.problem, error.status) ||
+      fallback ||
+      getDefaultErrorMessage(error.status)
+    );
+  }
+
+  return fallback;
+}
+
+function getDefaultErrorMessage(status: number) {
+  switch (status) {
+    case 400:
+      return "요청 내용을 다시 확인해주세요.";
+    case 401:
+      return "로그인 상태가 만료되었어요. 다시 로그인 후 시도해주세요.";
+    case 403:
+      return "이 작업을 수행할 권한이 없어요.";
+    case 404:
+      return "요청한 정보를 찾을 수 없어요.";
+    case 409:
+      return "현재 상태와 충돌해 요청을 처리하지 못했어요.";
+    case 422:
+      return "입력한 내용을 다시 확인해주세요.";
+    case 429:
+      return "요청이 많아요. 잠시 후 다시 시도해주세요.";
+    case 500:
+    case 502:
+    case 503:
+    case 504:
+      return "일시적인 서버 문제로 요청을 처리하지 못했어요. 잠시 후 다시 시도해주세요.";
+    default:
+      return "요청을 처리하지 못했어요. 잠시 후 다시 시도해주세요.";
   }
 }
 
@@ -70,10 +143,13 @@ async function parseProblemDetail(response: Response) {
   }
 }
 
-async function toApiError(response: Response, fallback: string) {
+async function toApiError(response: Response, fallback?: string) {
   const problem = await parseProblemDetail(response);
   const message =
-    problem?.detail || problem?.title || fallback || `요청에 실패했습니다. (${response.status})`;
+    getMappedProblemMessage(problem, response.status) ||
+    problem?.title ||
+    fallback ||
+    getDefaultErrorMessage(response.status);
 
   return new ApiError(message, response.status, problem);
 }
@@ -92,6 +168,14 @@ async function refreshSession() {
   } catch {
     return false;
   }
+}
+
+function notifyAuthExpired() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
 }
 
 async function executeRequest(path: string, options: ApiRequestOptions) {
@@ -130,7 +214,7 @@ export async function authRequest<T = void>(
   const response = await executeRequestToBaseUrl(AUTH_URL, path, options);
 
   if (!response.ok) {
-    throw await toApiError(response, `요청에 실패했습니다. (${response.status})`);
+    throw await toApiError(response);
   }
 
   if (parseAs === "void" || response.status === 204) {
@@ -176,7 +260,11 @@ export async function apiRequest<T = void>(
   }
 
   if (!response.ok) {
-    throw await toApiError(response, `요청에 실패했습니다. (${response.status})`);
+    if (auth && response.status === 401) {
+      notifyAuthExpired();
+    }
+
+    throw await toApiError(response);
   }
 
   if (parseAs === "void" || response.status === 204) {
@@ -195,7 +283,7 @@ export async function apiRequest<T = void>(
 }
 
 export function isApiError(error: unknown): error is ApiError {
-  return error instanceof ApiError;
+  return looksLikeApiError(error);
 }
 
 export { API_URL, AUTH_URL };

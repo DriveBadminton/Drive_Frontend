@@ -14,6 +14,7 @@ import {
   getCurrentUser,
   logout as logoutApi,
 } from "@/lib/auth";
+import { AUTH_EXPIRED_EVENT } from "@/lib/api";
 
 type AuthContextValue = {
   user: SessionUser | null;
@@ -67,6 +68,26 @@ export function AppProviders({ children }: { children: ReactNode }) {
   useEffect(() => {
     void fetchUser();
   }, [fetchUser]);
+
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      setUser(null);
+      setAccountStatus(null);
+      setIsLoading(false);
+
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      if (window.location.pathname.startsWith("/login")) {
+        return;
+      }
+
+      window.location.href = `/login?returnTo=${encodeURIComponent(currentPath)}`;
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    };
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({

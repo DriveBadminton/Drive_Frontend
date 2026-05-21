@@ -55,6 +55,8 @@ export default function LoginPageClient({
       title="RallyOn 로그인"
       description="계정을 연결하고 코트 운영과 플레이 흐름을 이어서 사용하세요."
       errorMessage={errorMessage}
+      screen="login"
+      returnTo={effectiveReturnTo}
       allowedProviders={session.allowedProviders}
       dummyOptions={session.dummyOptions}
       form={
